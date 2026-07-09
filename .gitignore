@@ -1,0 +1,13 @@
+build/
+__pycache__/
+*.pyc
+*.pyd
+*.dll
+*.so
+*.dylib
+*.exe
+*.obj
+*.o
+*.lib
+*.exp
+AGENTS.md
