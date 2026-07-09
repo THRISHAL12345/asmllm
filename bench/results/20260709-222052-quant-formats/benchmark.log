@@ -1,0 +1,19 @@
+================================================================================
+ asmllm Multi-Format Quantized Matrix-Vector Multiply Benchmark
+================================================================================
+Hardware:        Intel(R) Core(TM) 5 210H (12 logical cores)
+OS/Platform:     Windows-11-10.0.26200-SP0
+Python Version:  3.14.0
+Dimensions:      M=32, K=4096
+Trials:          15 runs per kernel (median & spread reported)
+--------------------------------------------------------------------------------
+FP32 NumPy Baseline   :    0.011 ms
+--------------------------------------------------------------------------------
+Q4_0 (Single-Thread)      0.013 ms (±0.002 ms) | Speedup vs FP32 NumPy:  0.85x
+Q4_0 (4-Thread AVX2)      0.047 ms (±0.027 ms) | Speedup vs FP32 NumPy:  0.24x
+Q8_0 (Single-Thread)      0.015 ms (±0.005 ms) | Speedup vs FP32 NumPy:  0.76x
+Q8_0 (4-Thread AVX2)      0.039 ms (±0.043 ms) | Speedup vs FP32 NumPy:  0.29x
+Q5_0 (Single-Thread)      0.024 ms (±0.003 ms) | Speedup vs FP32 NumPy:  0.47x
+Q5_0 (4-Thread AVX2)      0.038 ms (±0.024 ms) | Speedup vs FP32 NumPy:  0.30x
+================================================================================
+[SUCCESS] Benchmark complete. Logged to: C:\Users\THRISHAL\asmllm\bench\results\20260709-222052-quant-formats\benchmark.log
