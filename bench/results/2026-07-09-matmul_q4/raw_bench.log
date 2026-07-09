@@ -1,0 +1,7 @@
+Date: 2026-07-09T20:00:07.027001
+CPU:  Intel(R) Core(TM) 5 210H (12 logical cores)
+Dimensions: M=4096, K=4096
+asm_matmul_q4 (AVX2): 1.848 ms (IQR ±0.801 ms), 18.16 GFLOPS
+Reference Baseline:   4.406 ms (IQR ±1.291 ms), 7.62 GFLOPS
+Speedup vs reference: 2.38x
+Max Error: 7.93e-04
