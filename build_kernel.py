@@ -102,6 +102,21 @@ def build_x86_64_kernels():
             sys.exit(1)
 
         print(f"[SUCCESS] Built shared library with multi-threaded runtime: {dll_path}")
+
+        gguf_loader_c = PROJECT_ROOT / "src" / "loader" / "gguf_loader.c"
+        gguf_loader_dll = BUILD_DIR / "gguf_loader.dll"
+        gguf_loader_obj = BUILD_DIR / "gguf_loader.obj"
+        print(f"[build_kernel] Compiling {gguf_loader_c.name} to {gguf_loader_dll.name}...")
+        gguf_cmd = (
+            f'"{vcvars}" && cl.exe /nologo /LD /O2 /I"{PROJECT_ROOT / "src" / "loader"}" '
+            f'"{gguf_loader_c}" /Fe"{gguf_loader_dll}" /Fo"{gguf_loader_obj}"'
+        )
+        res_gguf = subprocess.run(gguf_cmd, shell=True, capture_output=True, text=True)
+        if res_gguf.returncode != 0:
+            print(f"[ERROR] gguf_loader compile failed:\n{res_gguf.stdout}\n{res_gguf.stderr}")
+            sys.exit(1)
+        print(f"[SUCCESS] Built GGUF loader DLL: {gguf_loader_dll}")
+
         return dll_path
 
     else:
