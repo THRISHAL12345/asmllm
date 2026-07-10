@@ -57,15 +57,18 @@ _asm_matmul_q5:
     cmp     x22, #32
     b.ge    .Lq5_inner_done
 
-    // extract low 4 bits from qs[x22/2]
-    lsr     x11, x22, #1
+    // extract low 4 bits using split-halves convention
+    cmp     x22, #16
+    b.ge    .Lhigh_half
+    ldrb    w12, [x0, x22]
+    and     w13, w12, #0x0f
+    b       .Lgot_low_nibble
+.Lhigh_half:
+    sub     x11, x22, #16
     ldrb    w12, [x0, x11]
-    tst     x22, #1
-    csel    w13, w12, w12, eq
-    b.eq    .Leven_nibble
     lsr     w13, w12, #4
-.Leven_nibble:
     and     w13, w13, #0x0f
+.Lgot_low_nibble:
 
     // extract 5th bit from qh
     lsr     w14, w10, w22

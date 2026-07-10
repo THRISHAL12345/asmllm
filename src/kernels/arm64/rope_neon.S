@@ -56,81 +56,95 @@ _asm_rope:
     fmul    s1, s1, s3
     fneg    s1, s1               // s1 = -e * ln(theta)
 
-    // Compute exp(s1) using 7th order Taylor series for exp(x)
-    fmov    s4, #1.0             // term = 1.0
-    fmov    s5, #1.0             // sum = 1.0
-    // n=1..12
-    mov     x9, #1
-.Lexp_loop:
-    cmp     x9, #12
-    b.gt    .Lexp_done
-    fmul    s4, s4, s1
-    ucvtf   s6, x9
-    fdiv    s4, s4, s6
-    fadd    s5, s5, s4
-    add     x9, x9, #1
-    b       .Lexp_loop
-.Lexp_done:
-    // s5 = inv_freq = theta^(-2j/head_dim)
+    // Range-reduced exp(s1): n = round(s1 / ln2), r = s1 - n * ln2
+    ldr     s4, .Linv_ln2
+    fmul    s4, s1, s4
+    fcvtas  w10, s4
+    scvtf   s6, w10
+    ldr     s4, .Lln2
+    fmsub   s6, s6, s4, s1       // s6 = r
+
+    ldr     s5, .Lc5             // 1/120
+    ldr     s4, .Lc4             // 1/24
+    fmadd   s5, s5, s6, s4
+    ldr     s4, .Lc3             // 1/6
+    fmadd   s5, s5, s6, s4
+    ldr     s4, .Lc2             // 1/2
+    fmadd   s5, s5, s6, s4
+    fmov    s4, #1.0
+    fmadd   s5, s5, s6, s4
+    fmadd   s5, s5, s6, s4       // P(r)
+
+    mov     w11, #-126
+    cmp     w10, w11
+    b.lt    .Lrope_exp_underflow
+    add     w10, w10, #127
+    lsl     w10, w10, #23
+    fmov    s4, w10
+    fmul    s5, s5, s4
+    b       .Lrope_exp_done
+.Lrope_exp_underflow:
+    fmov    s5, #0.0
+.Lrope_exp_done:
+
     fmul    s7, s16, s5          // s7 = angle = pos * inv_freq
 
-    // Reduce angle modulo 2*pi to prevent range loss in Taylor series
-    ldr     s8, .Ltwo_pi
-    ldr     s9, .Linv_two_pi
-    fmul    s10, s7, s9
-    // integer round to zero
-    fcvtzu  w10, s10
-    ucvtf   s10, w10
-    fmsub   s7, s10, s8, s7      // angle in [0, 2pi)
+    // Quadrant reduction for angle s7 to [-pi/4, pi/4]
+    ldr     s8, .Ltwo_over_pi
+    fmul    s8, s7, s8
+    fcvtas  w10, s8              // w10 = q = round(a / (pi/2))
+    scvtf   s8, w10
+    ldr     s9, .Lpi_over_two
+    fmsub   s8, s8, s9, s7       // s8 = r = a - q * (pi/2), |r| <= pi/4
 
-    // Compute cos(angle) in s17 and sin(angle) in s18 using Taylor series
-    // cos(x) = 1 - x^2/2! + x^4/4! - ...
-    // sin(x) = x - x^3/3! + x^5/5! - ...
-    fmul    s11, s7, s7          // s11 = x^2
+    fmul    s9, s8, s8           // s9 = r^2
 
-    // cos(angle)
-    fmov    s17, #1.0
-    fmov    s12, #1.0            // term = 1
-    fneg    s13, s11             // -x^2
-    fmov    s14, #2.0
-    fdiv    s12, s13, s14        // -x^2 / 2
-    fadd    s17, s17, s12
-    fmul    s12, s12, s13
-    fmov    s14, #12.0           // 3*4
-    fdiv    s12, s12, s14
-    fadd    s17, s17, s12
-    fmul    s12, s12, s13
-    fmov    s14, #30.0           // 5*6
-    fdiv    s12, s12, s14
-    fadd    s17, s17, s12
-    fmul    s12, s12, s13
-    mov     w9, #56              // 7*8
-    scvtf   s14, w9
-    fdiv    s12, s12, s14
-    fadd    s17, s17, s12
+    // sin(r) in s11
+    ldr     s11, .Lsin_c4
+    ldr     s12, .Lsin_c3
+    fmadd   s11, s11, s9, s12
+    ldr     s12, .Lsin_c2
+    fmadd   s11, s11, s9, s12
+    ldr     s12, .Lsin_c1
+    fmadd   s11, s11, s9, s12
+    fmov    s12, #1.0
+    fmadd   s11, s11, s9, s12
+    fmul    s11, s11, s8
 
-    // sin(angle)
-    fmov    s18, s7
-    fmov    s12, s7
-    fneg    s13, s11
-    fmov    s14, #6.0            // 3!
-    fmul    s12, s12, s13
-    fdiv    s12, s12, s14
-    fadd    s18, s18, s12
-    fmul    s12, s12, s13
-    fmov    s14, #20.0           // 4*5
-    fdiv    s12, s12, s14
-    fadd    s18, s18, s12
-    fmul    s12, s12, s13
-    mov     w9, #42              // 6*7
-    scvtf   s14, w9
-    fdiv    s12, s12, s14
-    fadd    s18, s18, s12
-    fmul    s12, s12, s13
-    mov     w9, #72              // 8*9
-    scvtf   s14, w9
-    fdiv    s12, s12, s14
-    fadd    s18, s18, s12
+    // cos(r) in s12
+    ldr     s12, .Lcos_c4
+    ldr     s13, .Lcos_c3
+    fmadd   s12, s12, s9, s13
+    ldr     s13, .Lcos_c2
+    fmadd   s12, s12, s9, s13
+    ldr     s13, .Lcos_c1
+    fmadd   s12, s12, s9, s13
+    fmov    s13, #1.0
+    fmadd   s12, s12, s9, s13
+
+    and     w10, w10, #3
+    cmp     w10, #0
+    b.eq    .Lquad_0
+    cmp     w10, #1
+    b.eq    .Lquad_1
+    cmp     w10, #2
+    b.eq    .Lquad_2
+    // quad 3: cos = S, sin = -C
+    fmov    s17, s11
+    fneg    s18, s12
+    b       .Lquad_done
+.Lquad_0:
+    fmov    s17, s12
+    fmov    s18, s11
+    b       .Lquad_done
+.Lquad_1:
+    fneg    s17, s11
+    fmov    s18, s12
+    b       .Lquad_done
+.Lquad_2:
+    fneg    s17, s12
+    fneg    s18, s11
+.Lquad_done:
 
     // Apply rotation to q[2j], q[2j+1]
     add     x9, x0, x20, lsl #3  // &q[2j]
@@ -167,10 +181,22 @@ _asm_rope:
     ldp     x29, x30, [sp], 48
     ret
 
+.section .rodata
 .align 4
-.Lln_10000:
-    .word 0x41135cb1             // 9.2103405 float32
-.Ltwo_pi:
-    .word 0x40c90fdb             // 6.2831855 float32
-.Linv_two_pi:
-    .word 0x3e22f983             // 0.1591549 float32
+.Lln_10000:     .float 9.210340371976184
+.Linv_ln2:      .float 1.4426950408889634
+.Lln2:          .float 0.6931471805599453
+.Lc5:           .float 0.008333333333333333
+.Lc4:           .float 0.041666666666666664
+.Lc3:           .float 0.16666666666666666
+.Lc2:           .float 0.5
+.Ltwo_over_pi:  .float 0.6366197723675814
+.Lpi_over_two:  .float 1.5707963267948966
+.Lsin_c4:       .float 2.75573192e-06
+.Lsin_c3:       .float -0.000198412701
+.Lsin_c2:       .float 0.00833333377
+.Lsin_c1:       .float -0.166666672
+.Lcos_c4:       .float 2.48015873e-05
+.Lcos_c3:       .float -0.00138888894
+.Lcos_c2:       .float 0.0416666679
+.Lcos_c1:       .float -0.5

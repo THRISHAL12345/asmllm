@@ -49,23 +49,39 @@ _asm_softmax:
     ldr     s2, [x9]
     fsub    s2, s2, s0           // z = x_i - max_val
 
-    // Compute exp(z) using Taylor polynomial (1 + z + z^2/2! + ... + z^8/8!)
-    fmov    s3, #1.0             // term = 1
-    fmov    s4, #1.0             // exp_z = 1
-    mov     x9, #1
-.Lpoly_loop:
-    cmp     x9, #10
-    b.gt    .Lpoly_done
-    fmul    s3, s3, s2
-    ucvtf   s5, x9
-    fdiv    s3, s3, s5
-    fadd    s4, s4, s3
-    add     x9, x9, #1
-    b       .Lpoly_loop
-.Lpoly_done:
-    // Ensure non-negative
-    fmov    s5, #0.0
-    fmax    s4, s4, s5
+    // Range-reduced exp(z): n = round(z / ln2), r = z - n * ln2
+    ldr     s10, .Linv_ln2
+    fmul    s10, s2, s10         // s10 = z / ln2
+    fcvtas  w10, s10             // w10 = n = round(z / ln2)
+    scvtf   s11, w10             // s11 = float(n)
+    ldr     s12, .Lln2
+    fmsub   s13, s11, s12, s2    // s13 = r = z - n * ln2
+
+    // Evaluate Horner polynomial for exp(r) on [-0.3465, 0.3465]
+    // P(r) = 1 + r*(1 + r*(1/2 + r*(1/6 + r*(1/24 + r*(1/120)))))
+    ldr     s4, .Lc5             // 1/120
+    ldr     s12, .Lc4            // 1/24
+    fmadd   s4, s4, s13, s12
+    ldr     s12, .Lc3            // 1/6
+    fmadd   s4, s4, s13, s12
+    ldr     s12, .Lc2            // 1/2
+    fmadd   s4, s4, s13, s12
+    fmov    s12, #1.0
+    fmadd   s4, s4, s13, s12
+    fmadd   s4, s4, s13, s12     // s4 = P(r)
+
+    // Compute 2^n via IEEE-754 exponent bit manipulation
+    mov     w11, #-126
+    cmp     w10, w11
+    b.lt    .Lexp_underflow
+    add     w10, w10, #127
+    lsl     w10, w10, #23
+    fmov    s14, w10
+    fmul    s4, s4, s14          // s4 = exp(z)
+    b       .Lexp_store
+.Lexp_underflow:
+    fmov    s4, #0.0
+.Lexp_store:
 
     add     x10, x1, x19, lsl #2
     str     s4, [x10]            // y[i] = exp_z
@@ -108,3 +124,12 @@ _asm_softmax:
     ldp     x19, x20, [sp, 16]
     ldp     x29, x30, [sp], 32
     ret
+
+.section .rodata
+.align 4
+.Linv_ln2:  .float 1.4426950408889634
+.Lln2:      .float 0.6931471805599453
+.Lc5:       .float 0.008333333333333333
+.Lc4:       .float 0.041666666666666664
+.Lc3:       .float 0.16666666666666666
+.Lc2:       .float 0.5
