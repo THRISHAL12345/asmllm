@@ -3,31 +3,46 @@
 ================================================================================
 
 [generate.py] Loading real published GGUF checkpoint: models/stories15M-q4_0.gguf
-Prompt Tokens: [1, 9038, 2501, 263, 931] -> '<s> Once upon a time'
+Prompt Tokens: [1, 9038, 2501, 263, 931] -> '<s>▁Once▁upon▁a▁time'
 
 Step   asmllm Token ID   asmllm Text            Reference Token ID   Exact Match?
 -------------------------------------------------------------------------------------
-1      24423             ' Jag'                 24423                YES
-2      23999             ' числе'               23999                YES
-3      240               '<0xED>'               240                  YES
-4      27833             ' Augen'               27833                YES
-5      30742             '回'                    30742                YES
-6      21320             ' suas'                21320                YES
-7      7260              ' Á'                   7260                 YES
-8      25489             'ljen'                 25489                YES
-9      9695              'crit'                 9695                 YES
-10     7929              ' duplicate'           7929                 YES
-11     16966             'спе'                  16966                YES
-12     12879             ' obviously'           12879                YES
-13     21359             ' raggi'               21359                YES
-14     6764              'emy'                  6764                 YES
-15     11626             'Chr'                  11626                YES
+1      29892             ','                    29892                YES
+2      727               '▁there'               727                  YES
+3      471               '▁was'                 471                  YES
+4      263               '▁a'                   263                  YES
+5      2217              '▁little'              2217                 YES
+6      7826              '▁girl'                7826                 YES
+7      4257              '▁named'               4257                 YES
+8      365               '▁L'                   365                  YES
+9      2354              'ily'                  2354                 YES
+10     29889             '.'                    29889                YES
+11     2296              '▁She'                 2296                 YES
+12     18012             '▁loved'               18012                YES
+13     304               '▁to'                  304                  YES
+14     1708              '▁play'                1708                 YES
+15     5377              '▁outside'             5377                 YES
+16     322               '▁and'                 322                  YES
+17     26987             '▁explore'             26987                YES
+18     278               '▁the'                 278                  YES
+19     3186              '▁world'               3186                 YES
+20     2820              '▁around'              2820                 YES
+21     902               '▁her'                 902                  YES
+22     29889             '.'                    29889                YES
+23     3118              '▁One'                 3118                 YES
+24     2462              '▁day'                 2462                 YES
+25     29892             ','                    29892                YES
+26     1183              '▁she'                 1183                 YES
+27     3512              '▁went'                3512                 YES
+28     373               '▁on'                  373                  YES
+29     263               '▁a'                   263                  YES
+30     6686              '▁walk'                6686                 YES
 -------------------------------------------------------------------------------------
 
 asmllm Generated Output Text:
-  '<s> Once upon a time Jag числе<0xED> Augen回 suas Áljencrit duplicateспе obviously raggiemyChr'
+  '<s>▁Once▁upon▁a▁time,▁there▁was▁a▁little▁girl▁named▁Lily.▁She▁loved▁to▁play▁outside▁and▁explore▁the▁world▁around▁her.▁One▁day,▁she▁went▁on▁a▁walk'
 Reference Generated Output Text:
-  '<s> Once upon a time Jag числе<0xED> Augen回 suas Áljencrit duplicateспе obviously raggiemyChr'
+  '<s>▁Once▁upon▁a▁time,▁there▁was▁a▁little▁girl▁named▁Lily.▁She▁loved▁to▁play▁outside▁and▁explore▁the▁world▁around▁her.▁One▁day,▁she▁went▁on▁a▁walk'
 
 [M2 PASSED] 100% Token-for-Token Exact Match on Greedy Decoding vs Reference Engine!
 ================================================================================

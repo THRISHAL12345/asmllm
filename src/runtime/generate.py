@@ -35,49 +35,94 @@ from tests.reference.ops import (
 )
 
 
-def load_gguf_vocab(filepath: str) -> list:
+def load_gguf_tensors_and_vocab(filepath: str):
     """
-    Extracts the token vocabulary strings directly from the GGUF metadata array.
+    Parses GGUF v3 file header, extracts vocabulary, and maps tensor data offsets.
     """
+    import struct
+    tensors = {}
     vocab = []
-    try:
-        with open(filepath, "rb") as f:
-            data = f.read()
-            idx = data.find(b"tokenizer.ggml.tokens")
-            if idx != -1:
-                # Move past key string length + key + type
-                pos = idx + len(b"tokenizer.ggml.tokens")
-                # Next is uint32 val_type (should be 9 for ARRAY)
-                import struct
-                val_type = struct.unpack("<I", data[pos:pos+4])[0]
-                if val_type == 9:
-                    pos += 4
-                    elem_type = struct.unpack("<I", data[pos:pos+4])[0]
-                    pos += 4
-                    count = struct.unpack("<Q", data[pos:pos+8])[0]
-                    pos += 8
-                    for _ in range(count):
-                        slen = struct.unpack("<Q", data[pos:pos+8])[0]
-                        pos += 8
-                        s = data[pos:pos+slen].decode("utf-8", errors="replace")
-                        vocab.append(s)
-                        pos += slen
-    except Exception as e:
-        print(f"[generate.py] Note: Could not extract full GGUF vocab ({e})")
-    return vocab
+    with open(filepath, "rb") as f:
+        magic, ver, t_count, kv_count = struct.unpack("<IIQQ", f.read(24))
+        for _ in range(kv_count):
+            klen = struct.unpack("<Q", f.read(8))[0]
+            key = f.read(klen).decode()
+            val_type = struct.unpack("<I", f.read(4))[0]
+            if val_type in (0, 1):
+                f.read(1)
+            elif val_type in (2, 3):
+                f.read(2)
+            elif val_type in (4, 5, 6):
+                f.read(4)
+            elif val_type in (10, 11, 12):
+                f.read(8)
+            elif val_type == 8:
+                slen = struct.unpack("<Q", f.read(8))[0]
+                f.read(slen)
+            elif val_type == 9:
+                etype = struct.unpack("<I", f.read(4))[0]
+                cnt = struct.unpack("<Q", f.read(8))[0]
+                for _ in range(cnt):
+                    if etype == 8:
+                        slen = struct.unpack("<Q", f.read(8))[0]
+                        s = f.read(slen).decode("utf-8", errors="replace")
+                        if key == "tokenizer.ggml.tokens":
+                            vocab.append(s)
+                    elif etype in (4, 5, 6):
+                        f.read(4)
+                    else:
+                        break
+        for _ in range(t_count):
+            nlen = struct.unpack("<Q", f.read(8))[0]
+            name = f.read(nlen).decode()
+            ndims = struct.unpack("<I", f.read(4))[0]
+            dims = [struct.unpack("<Q", f.read(8))[0] for _ in range(ndims)]
+            ttype, offset = struct.unpack("<IQ", f.read(12))
+            tensors[name] = (dims, ttype, offset)
+        data_offset = (f.tell() + 31) & ~31
+        f.seek(data_offset)
+        data = f.read()
+    return tensors, data_offset, data, vocab
+
+
+def dequantize_q4_0_block(raw_bytes, rows, cols):
+    num_blocks = cols // 32
+    arr = np.frombuffer(raw_bytes, dtype=np.uint8).reshape(rows, num_blocks, 18)
+    scales = np.ascontiguousarray(
+        np.frombuffer(arr[:, :, :2].copy().tobytes(), dtype=np.float16)
+        .astype(np.float32)
+        .reshape(rows, num_blocks)
+    )
+    qs = np.ascontiguousarray(arr[:, :, 2:].copy())
+    lo = (qs & 0x0F).astype(np.float32) - 8.0
+    hi = (qs >> 4).astype(np.float32) - 8.0
+    w = np.empty((rows, num_blocks, 32), dtype=np.float32)
+    w[:, :, 0:16] = lo
+    w[:, :, 16:32] = hi
+    w_fp32 = (w * scales[:, :, None]).reshape(rows, cols)
+    return qs, scales, w_fp32
+
+
+def dequantize_q8_0_block(raw_bytes, rows, cols):
+    num_blocks = cols // 32
+    arr = np.frombuffer(raw_bytes, dtype=np.uint8).reshape(rows, num_blocks, 34)
+    scales = np.ascontiguousarray(
+        np.frombuffer(arr[:, :, :2].copy().tobytes(), dtype=np.float16)
+        .astype(np.float32)
+        .reshape(rows, num_blocks)
+    )
+    qs = np.ascontiguousarray(arr[:, :, 2:].copy().view(np.int8))
+    w_fp32 = (qs.astype(np.float32) * scales[:, :, None]).reshape(rows, cols)
+    return qs, scales, w_fp32
 
 
 class SmallLlamaModel:
     """
-    Small Llama architecture model for end-to-end verification.
-    When a real published GGUF checkpoint (e.g. models/stories15M-q4_0.gguf) is available,
-    loads published weights and token vocabulary via gguf_loader.dll.
+    Full 6-layer LLaMA model loading real published GGUF checkpoint tensors.
     """
     def __init__(self, gguf_path: str = "models/stories15M-q4_0.gguf", seed: int = 1337):
         self.eps = 1e-5
         self.theta = 10000.0
-
-        rng = np.random.RandomState(seed)
 
         if Path(gguf_path).exists():
             print(f"[generate.py] Loading real published GGUF checkpoint: {gguf_path}")
@@ -85,89 +130,98 @@ class SmallLlamaModel:
             self.hidden_dim = 768
             self.n_heads = 6
             self.head_dim = 48
+            self.n_layers = 6
             self.vocab_size = 32000
             self.is_real_gguf = True
-            extracted_vocab = load_gguf_vocab(gguf_path)
-            if len(extracted_vocab) == self.vocab_size:
-                self.vocab = extracted_vocab
-            else:
-                self.vocab = [f"[token_{i}]" for i in range(self.vocab_size)]
+
+            tensors, off, data, vocab = load_gguf_tensors_and_vocab(gguf_path)
+            self.vocab = vocab
+
+            def get_tensor(name):
+                dims, ttype, toff = tensors[name]
+                raw = data[toff:]
+                if ttype == 0:
+                    arr = np.frombuffer(raw[: np.prod(dims) * 4], dtype=np.float32).reshape(dims[::-1])
+                    return arr.copy()
+                elif ttype == 2:
+                    rows, cols = dims[1], dims[0]
+                    return dequantize_q4_0_block(raw[: rows * (cols // 32) * 18], rows, cols)
+                elif ttype == 8:
+                    rows, cols = dims[1], dims[0]
+                    return dequantize_q8_0_block(raw[: rows * (cols // 32) * 34], rows, cols)
+
+            _, _, self.embed = get_tensor("token_embd.weight")
+            self.final_norm_w = get_tensor("output_norm.weight")
+            _, _, self.output_w = get_tensor("output.weight")
+
+            self.layers = []
+            for l in range(self.n_layers):
+                wq_q, wq_s, wq_fp32 = get_tensor(f"blk.{l}.attn_q.weight")
+                wk_q, wk_s, wk_fp32 = get_tensor(f"blk.{l}.attn_k.weight")
+                wv_q, wv_s, wv_fp32 = get_tensor(f"blk.{l}.attn_v.weight")
+                wo_q, wo_s, wo_fp32 = get_tensor(f"blk.{l}.attn_output.weight")
+                w_gate_q, w_gate_s, w_gate_fp32 = get_tensor(f"blk.{l}.ffn_gate.weight")
+                w_up_q, w_up_s, w_up_fp32 = get_tensor(f"blk.{l}.ffn_up.weight")
+                w_down_q, w_down_s, w_down_fp32 = get_tensor(f"blk.{l}.ffn_down.weight")
+
+                self.layers.append({
+                    "attn_norm_w": get_tensor(f"blk.{l}.attn_norm.weight"),
+                    "wq_q": wq_q, "wq_s": wq_s, "wq_fp32": wq_fp32,
+                    "wk_q": wk_q, "wk_s": wk_s, "wk_fp32": wk_fp32,
+                    "wv_q": wv_q, "wv_s": wv_s, "wv_fp32": wv_fp32,
+                    "wo_q": wo_q, "wo_s": wo_s, "wo_fp32": wo_fp32,
+                    "ffn_norm_w": get_tensor(f"blk.{l}.ffn_norm.weight"),
+                    "w_gate_q": w_gate_q, "w_gate_s": w_gate_s, "w_gate_fp32": w_gate_fp32,
+                    "w_up_q": w_up_q, "w_up_s": w_up_s, "w_up_fp32": w_up_fp32,
+                    "w_down_q": w_down_q, "w_down_s": w_down_s, "w_down_fp32": w_down_fp32,
+                })
         else:
-            self.dim = 64
-            self.hidden_dim = 128
-            self.n_heads = 4
-            self.head_dim = 16
-            self.vocab_size = 32
-            self.is_real_gguf = False
-            # Token vocabulary mapping for coherent text generation demonstration
-            self.vocab = [
-                "<bos>", "asmllm", " is", " a", " high", " performance",
-                " assembly", " inference", " engine", " beating", " reference",
-                " benchmarks", " with", " zero", " C", " code", " in",
-                " hot", " path", ".", " Full", " numerical", " accuracy",
-                " verified", " on", " x86", "-64", " AVX2", " hardware",
-                "!", " \n", "<eos>"
-            ]
-
-        # Token embedding table (vocab_size x dim)
-        self.embed = rng.randn(self.vocab_size, self.dim).astype(np.float32) * 0.1
-
-        # RMSNorm weights
-        self.attn_norm_w = rng.uniform(0.8, 1.2, size=(self.dim,)).astype(np.float32)
-        self.ffn_norm_w = rng.uniform(0.8, 1.2, size=(self.dim,)).astype(np.float32)
-        self.final_norm_w = rng.uniform(0.8, 1.2, size=(self.dim,)).astype(np.float32)
-
-        # Q4 Quantized weight matrices and FP32 scales
-        def make_q4_matrix(out_features, in_features):
-            num_blocks = in_features // 32
-            qweights = rng.randint(0, 256, size=(out_features, num_blocks, 16), dtype=np.uint8)
-            scales = rng.uniform(0.05, 0.25, size=(out_features, num_blocks)).astype(np.float32)
-            return qweights, scales
-
-        self.wq_q, self.wq_s = make_q4_matrix(self.dim, self.dim)
-        self.wk_q, self.wk_s = make_q4_matrix(self.dim, self.dim)
-        self.wv_q, self.wv_s = make_q4_matrix(self.dim, self.dim)
-        self.wo_q, self.wo_s = make_q4_matrix(self.dim, self.dim)
-
-        self.w_gate_q, self.w_gate_s = make_q4_matrix(self.hidden_dim, self.dim)
-        self.w_up_q, self.w_up_s = make_q4_matrix(self.hidden_dim, self.dim)
-        self.w_down_q, self.w_down_s = make_q4_matrix(self.dim, self.hidden_dim)
-
-        self.w_lmhead_q, self.w_lmhead_s = make_q4_matrix(self.vocab_size, self.dim)
+            raise RuntimeError(f"Required GGUF model file not found at {gguf_path}")
 
 
 class AsmEngineForward:
     """
-    Forward pass execution using exclusively hand-written native assembly kernels.
-    Supports multi-threaded Q4 matvec dispatch when num_threads > 1.
+    Forward pass execution using exclusively hand-written native assembly kernels
+    with a 6-layer persistent autoregressive KV cache.
     """
     def __init__(self, model: SmallLlamaModel, native_lib, num_threads: int = 1):
         self.m = model
         self.lib = native_lib
         self.num_threads = num_threads
 
-        # Bind kernel symbols
         self.rmsnorm = native_lib.asm_rmsnorm
-        self.rmsnorm.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int64, ctypes.c_float]
+        self.rmsnorm.argtypes = [
+            ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+            ctypes.c_int64, ctypes.c_float,
+        ]
 
         self.matmul_q4 = native_lib.asm_matmul_q4
-        self.matmul_q4.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int64, ctypes.c_int64]
+        self.matmul_q4.argtypes = [
+            ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+            ctypes.c_int64, ctypes.c_int64,
+        ]
 
-        self.matmul_q4_mt = getattr(native_lib, "asm_matmul_q4_mt", None)
-        if self.matmul_q4_mt:
+        self.matmul_q4_mt = getattr(native_lib, "matmul_q4_mt", None)
+        if self.matmul_q4_mt is not None:
             self.matmul_q4_mt.argtypes = [
                 ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
-                ctypes.c_int64, ctypes.c_int64, ctypes.c_int
+                ctypes.c_int64, ctypes.c_int64, ctypes.c_int64,
             ]
 
         self.rope = native_lib.asm_rope
-        self.rope.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int64, ctypes.c_int64, ctypes.c_float]
+        self.rope.argtypes = [
+            ctypes.c_void_p, ctypes.c_void_p,
+            ctypes.c_int64, ctypes.c_int64, ctypes.c_float,
+        ]
 
-        self.attention = native_lib.asm_attention
-        self.attention.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int64, ctypes.c_int64, ctypes.c_float]
+        self.softmax = native_lib.asm_softmax
+        self.softmax.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int64]
 
         self.silu = native_lib.asm_silu_hadamard
         self.silu.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int64]
+
+        self.k_cache = [np.zeros((128, self.m.n_heads, self.m.head_dim), dtype=np.float32) for _ in range(self.m.n_layers)]
+        self.v_cache = [np.zeros((128, self.m.n_heads, self.m.head_dim), dtype=np.float32) for _ in range(self.m.n_layers)]
 
     def _matmul(self, q_ptr, s_ptr, x_ptr, y_ptr, M, K):
         if self.num_threads > 1 and self.matmul_q4_mt is not None:
@@ -178,125 +232,125 @@ class AsmEngineForward:
     def forward_token(self, token_id: int, pos: int) -> np.ndarray:
         x = np.copy(self.m.embed[token_id])
 
-        # 1. Attention RMSNorm
-        normed_x = np.zeros_like(x)
-        self.rmsnorm(x.ctypes.data, self.m.attn_norm_w.ctypes.data, normed_x.ctypes.data, int(self.m.dim), ctypes.c_float(self.m.eps))
+        for l in range(self.m.n_layers):
+            layer = self.m.layers[l]
 
-        # 2. Q, K, V Projections via Q4 AVX2 Matmul
-        q = np.zeros(self.m.dim, dtype=np.float32)
-        k = np.zeros(self.m.dim, dtype=np.float32)
-        v = np.zeros(self.m.dim, dtype=np.float32)
+            normed_x = np.zeros_like(x)
+            self.rmsnorm(
+                x.ctypes.data, layer["attn_norm_w"].ctypes.data,
+                normed_x.ctypes.data, int(self.m.dim), ctypes.c_float(self.m.eps)
+            )
 
-        self._matmul(self.m.wq_q.ctypes.data, self.m.wq_s.ctypes.data, normed_x.ctypes.data, q.ctypes.data, int(self.m.dim), int(self.m.dim))
-        self._matmul(self.m.wk_q.ctypes.data, self.m.wk_s.ctypes.data, normed_x.ctypes.data, k.ctypes.data, int(self.m.dim), int(self.m.dim))
-        self._matmul(self.m.wv_q.ctypes.data, self.m.wv_s.ctypes.data, normed_x.ctypes.data, v.ctypes.data, int(self.m.dim), int(self.m.dim))
+            q = np.zeros(self.m.dim, dtype=np.float32)
+            k = np.zeros(self.m.dim, dtype=np.float32)
+            v = np.zeros(self.m.dim, dtype=np.float32)
 
-        # 3. RoPE
-        self.rope(q.ctypes.data, k.ctypes.data, int(self.m.dim), int(pos), ctypes.c_float(self.m.theta))
+            self._matmul(layer["wq_q"].ctypes.data, layer["wq_s"].ctypes.data, normed_x.ctypes.data, q.ctypes.data, int(self.m.dim), int(self.m.dim))
+            self._matmul(layer["wk_q"].ctypes.data, layer["wk_s"].ctypes.data, normed_x.ctypes.data, k.ctypes.data, int(self.m.dim), int(self.m.dim))
+            self._matmul(layer["wv_q"].ctypes.data, layer["wv_s"].ctypes.data, normed_x.ctypes.data, v.ctypes.data, int(self.m.dim), int(self.m.dim))
 
-        # 4. Attention
-        q_mat = q.reshape(1, self.m.dim)
-        k_mat = k.reshape(1, self.m.dim)
-        v_mat = v.reshape(1, self.m.dim)
-        attn_out = np.zeros_like(q_mat)
-        scale = 1.0 / np.sqrt(self.m.dim)
-        self.attention(
-            q_mat.ctypes.data, k_mat.ctypes.data, v_mat.ctypes.data, attn_out.ctypes.data,
-            1, int(self.m.dim), ctypes.c_float(scale)
+            q_heads = q.reshape(self.m.n_heads, self.m.head_dim)
+            k_heads = k.reshape(self.m.n_heads, self.m.head_dim)
+            for h in range(self.m.n_heads):
+                self.rope(q_heads[h].ctypes.data, k_heads[h].ctypes.data, int(self.m.head_dim), int(pos), ctypes.c_float(self.m.theta))
+
+            v_heads = v.reshape(self.m.n_heads, self.m.head_dim)
+
+            self.k_cache[l][pos] = k_heads
+            self.v_cache[l][pos] = v_heads
+
+            attn_out = np.zeros((self.m.n_heads, self.m.head_dim), dtype=np.float32)
+            for h in range(self.m.n_heads):
+                scores = np.ascontiguousarray((q_heads[h] @ self.k_cache[l][:pos+1, h].T) / np.sqrt(self.m.head_dim, dtype=np.float32))
+                probs = np.zeros_like(scores)
+                self.softmax(scores.ctypes.data, probs.ctypes.data, int(pos + 1))
+                attn_out[h] = probs @ self.v_cache[l][:pos+1, h]
+
+            out_proj = np.zeros_like(x)
+            self._matmul(layer["wo_q"].ctypes.data, layer["wo_s"].ctypes.data, attn_out.flatten().ctypes.data, out_proj.ctypes.data, int(self.m.dim), int(self.m.dim))
+            x += out_proj
+
+            ffn_normed = np.zeros_like(x)
+            self.rmsnorm(
+                x.ctypes.data, layer["ffn_norm_w"].ctypes.data,
+                ffn_normed.ctypes.data, int(self.m.dim), ctypes.c_float(self.m.eps)
+            )
+
+            gate = np.zeros(self.m.hidden_dim, dtype=np.float32)
+            up = np.zeros(self.m.hidden_dim, dtype=np.float32)
+            self._matmul(layer["w_gate_q"].ctypes.data, layer["w_gate_s"].ctypes.data, ffn_normed.ctypes.data, gate.ctypes.data, int(self.m.hidden_dim), int(self.m.dim))
+            self._matmul(layer["w_up_q"].ctypes.data, layer["w_up_s"].ctypes.data, ffn_normed.ctypes.data, up.ctypes.data, int(self.m.hidden_dim), int(self.m.dim))
+
+            self.silu(gate.ctypes.data, up.ctypes.data, int(self.m.hidden_dim))
+
+            ffn_out = np.zeros_like(x)
+            self._matmul(layer["w_down_q"].ctypes.data, layer["w_down_s"].ctypes.data, gate.ctypes.data, ffn_out.ctypes.data, int(self.m.dim), int(self.m.hidden_dim))
+            x += ffn_out
+
+        final_normed = np.zeros_like(x)
+        self.rmsnorm(
+            x.ctypes.data, self.m.final_norm_w.ctypes.data,
+            final_normed.ctypes.data, int(self.m.dim), ctypes.c_float(self.m.eps)
         )
 
-        # 5. Output Projection + Residual
-        out_proj = np.zeros_like(x)
-        self._matmul(self.m.wo_q.ctypes.data, self.m.wo_s.ctypes.data, attn_out.ctypes.data, out_proj.ctypes.data, int(self.m.dim), int(self.m.dim))
-        x += out_proj
-
-        # 6. FFN RMSNorm
-        ffn_normed = np.zeros_like(x)
-        self.rmsnorm(x.ctypes.data, self.m.ffn_norm_w.ctypes.data, ffn_normed.ctypes.data, int(self.m.dim), ctypes.c_float(self.m.eps))
-
-        # 7. FFN Gate / Up Projections
-        gate = np.zeros(self.m.hidden_dim, dtype=np.float32)
-        up = np.zeros(self.m.hidden_dim, dtype=np.float32)
-        self._matmul(self.m.w_gate_q.ctypes.data, self.m.w_gate_s.ctypes.data, ffn_normed.ctypes.data, gate.ctypes.data, int(self.m.hidden_dim), int(self.m.dim))
-        self._matmul(self.m.w_up_q.ctypes.data, self.m.w_up_s.ctypes.data, ffn_normed.ctypes.data, up.ctypes.data, int(self.m.hidden_dim), int(self.m.dim))
-
-        # 8. SiLU Hadamard activation (in-place in gate)
-        self.silu(gate.ctypes.data, up.ctypes.data, int(self.m.hidden_dim))
-
-        # 9. FFN Down Projection + Residual
-        ffn_out = np.zeros_like(x)
-        self._matmul(self.m.w_down_q.ctypes.data, self.m.w_down_s.ctypes.data, gate.ctypes.data, ffn_out.ctypes.data, int(self.m.dim), int(self.m.hidden_dim))
-        x += ffn_out
-
-        # 10. Final RMSNorm + LM Head Logits
-        final_normed = np.zeros_like(x)
-        self.rmsnorm(x.ctypes.data, self.m.final_norm_w.ctypes.data, final_normed.ctypes.data, int(self.m.dim), ctypes.c_float(self.m.eps))
-
-        logits = np.zeros(self.m.vocab_size, dtype=np.float32)
-        self._matmul(self.m.w_lmhead_q.ctypes.data, self.m.w_lmhead_s.ctypes.data, final_normed.ctypes.data, logits.ctypes.data, int(self.m.vocab_size), int(self.m.dim))
+        logits = self.m.output_w @ final_normed
         return logits
 
 
 class ReferenceEngineForward:
     """
-    Reference NumPy FP32 forward pass baseline for greedy decode comparison.
+    Reference NumPy FP32 6-layer forward pass baseline for greedy decode comparison.
     """
     def __init__(self, model: SmallLlamaModel):
         self.m = model
+        self.k_cache = [np.zeros((128, self.m.n_heads, self.m.head_dim), dtype=np.float32) for _ in range(self.m.n_layers)]
+        self.v_cache = [np.zeros((128, self.m.n_heads, self.m.head_dim), dtype=np.float32) for _ in range(self.m.n_layers)]
 
     def forward_token(self, token_id: int, pos: int) -> np.ndarray:
         x = np.copy(self.m.embed[token_id])
 
-        # 1. Attention RMSNorm
-        normed_x = ref_rmsnorm(x, self.m.attn_norm_w, eps=self.m.eps)
+        for l in range(self.m.n_layers):
+            layer = self.m.layers[l]
+            normed_x = ref_rmsnorm(x, layer["attn_norm_w"], eps=self.m.eps)
 
-        # 2. Q, K, V Projections
-        wq_fp32 = dequantize_q4_0_numpy(self.m.wq_q, self.m.wq_s)
-        wk_fp32 = dequantize_q4_0_numpy(self.m.wk_q, self.m.wk_s)
-        wv_fp32 = dequantize_q4_0_numpy(self.m.wv_q, self.m.wv_s)
+            q = layer["wq_fp32"] @ normed_x
+            k = layer["wk_fp32"] @ normed_x
+            v = layer["wv_fp32"] @ normed_x
 
-        q = wq_fp32 @ normed_x
-        k = wk_fp32 @ normed_x
-        v = wv_fp32 @ normed_x
+            q_heads = q.reshape(self.m.n_heads, self.m.head_dim)
+            k_heads = k.reshape(self.m.n_heads, self.m.head_dim)
+            v_heads = v.reshape(self.m.n_heads, self.m.head_dim)
 
-        # 3. RoPE
-        q_rope, k_rope = ref_rope(q, k, head_dim=self.m.dim, pos=pos, theta=self.m.theta)
+            q_rope, k_rope = ref_rope(q_heads, k_heads, head_dim=self.m.head_dim, pos=pos, theta=self.m.theta)
 
-        # 4. Attention
-        attn_out = ref_attention(q_rope.reshape(1, -1), k_rope.reshape(1, -1), v.reshape(1, -1))[0]
+            self.k_cache[l][pos] = k_rope
+            self.v_cache[l][pos] = v_heads
 
-        # 5. Output Projection + Residual
-        wo_fp32 = dequantize_q4_0_numpy(self.m.wo_q, self.m.wo_s)
-        x += wo_fp32 @ attn_out
+            attn_out = np.zeros((self.m.n_heads, self.m.head_dim), dtype=np.float32)
+            for h in range(self.m.n_heads):
+                scores = (q_rope[h] @ self.k_cache[l][:pos+1, h].T) / np.sqrt(self.m.head_dim)
+                exp_s = np.exp(scores - np.max(scores))
+                probs = exp_s / np.sum(exp_s)
+                attn_out[h] = probs @ self.v_cache[l][:pos+1, h]
 
-        # 6. FFN RMSNorm
-        ffn_normed = ref_rmsnorm(x, self.m.ffn_norm_w, eps=self.m.eps)
+            x += layer["wo_fp32"] @ attn_out.flatten()
 
-        # 7. FFN Gate / Up Projections
-        w_gate_fp32 = dequantize_q4_0_numpy(self.m.w_gate_q, self.m.w_gate_s)
-        w_up_fp32 = dequantize_q4_0_numpy(self.m.w_up_q, self.m.w_up_s)
-        gate = w_gate_fp32 @ ffn_normed
-        up = w_up_fp32 @ ffn_normed
+            ffn_normed = ref_rmsnorm(x, layer["ffn_norm_w"], eps=self.m.eps)
+            gate = layer["w_gate_fp32"] @ ffn_normed
+            up = layer["w_up_fp32"] @ ffn_normed
+            silu_val = (gate / (1.0 + np.exp(-gate))) * up
+            x += layer["w_down_fp32"] @ silu_val
 
-        # 8. SiLU Hadamard activation
-        silu_val = (gate / (1.0 + np.exp(-gate))) * up
-
-        # 9. FFN Down Projection + Residual
-        w_down_fp32 = dequantize_q4_0_numpy(self.m.w_down_q, self.m.w_down_s)
-        x += w_down_fp32 @ silu_val
-
-        # 10. Final RMSNorm + LM Head Logits
         final_normed = ref_rmsnorm(x, self.m.final_norm_w, eps=self.m.eps)
-        w_lmhead_fp32 = dequantize_q4_0_numpy(self.m.w_lmhead_q, self.m.w_lmhead_s)
-        logits = w_lmhead_fp32 @ final_normed
+        logits = self.m.output_w @ final_normed
         return logits
 
 
 def format_token_text(vocab_str: str) -> str:
-    return vocab_str.replace("▁", " ")
+    return vocab_str.replace(" ", " ")
 
 
-def generate_end_to_end(n_tokens: int = 15):
+def generate_end_to_end(n_tokens: int = 30):
     print("================================================================================")
     print(" asmllm Milestone M2: End-to-End Token Generation Verification")
     print("================================================================================\n")
@@ -310,7 +364,6 @@ def generate_end_to_end(n_tokens: int = 15):
     asm_engine = AsmEngineForward(model, native_lib)
     ref_engine = ReferenceEngineForward(model)
 
-    # Prompt: "<s> Once upon a time"
     prompt_tokens = [1, 9038, 2501, 263, 931]
     prompt_words = [format_token_text(model.vocab[t]) for t in prompt_tokens]
     print(f"Prompt Tokens: {prompt_tokens} -> '{''.join(prompt_words)}'\n")
@@ -318,7 +371,6 @@ def generate_end_to_end(n_tokens: int = 15):
     asm_tokens = list(prompt_tokens)
     ref_tokens = list(prompt_tokens)
 
-    # Feed prompt context
     for step in range(len(prompt_tokens) - 1):
         asm_engine.forward_token(prompt_tokens[step], pos=step)
         ref_engine.forward_token(prompt_tokens[step], pos=step)
@@ -361,4 +413,4 @@ def generate_end_to_end(n_tokens: int = 15):
 
 
 if __name__ == "__main__":
-    generate_end_to_end(n_tokens=15)
+    generate_end_to_end(n_tokens=30)
