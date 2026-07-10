@@ -53,7 +53,7 @@ _asm_matmul_q8:
 .Lq8_inner:
     cmp     x22, #32
     b.ge    .Lq8_inner_done
-    ldrscb  w9, [x0, x22]
+    ldrsb   w9, [x0, x22]
     scvtf   s2, w9
     ldr     s3, [x2, x22, lsl #2]
     fmul    s2, s2, s1
