@@ -181,11 +181,6 @@ _asm_rope:
     ldp     x29, x30, [sp], 48
     ret
 
-#if defined(__APPLE__)
-.section __TEXT,__const
-#else
-.section .rodata
-#endif
 .align 4
 .Lln_10000:     .float 9.210340371976184
 .Linv_ln2:      .float 1.4426950408889634
