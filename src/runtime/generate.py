@@ -124,7 +124,20 @@ class SmallLlamaModel:
         self.eps = 1e-5
         self.theta = 10000.0
 
-        if Path(gguf_path).exists():
+        found_gguf = None
+        for cand in [
+            Path(gguf_path),
+            Path("stories15M-q4_0.gguf"),
+            Path("models/stories15M-q4_0.gguf"),
+            Path(__file__).resolve().parent.parent.parent / "stories15M-q4_0.gguf",
+            Path(__file__).resolve().parent.parent.parent / "models" / "stories15M-q4_0.gguf",
+        ]:
+            if cand.exists():
+                found_gguf = cand
+                break
+
+        if found_gguf is not None:
+            gguf_path = str(found_gguf)
             print(f"[generate.py] Loading real published GGUF checkpoint: {gguf_path}")
             self.dim = 288
             self.hidden_dim = 768

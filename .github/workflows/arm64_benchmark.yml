@@ -31,7 +31,9 @@ jobs:
 
       - name: Download stories15M-q4_0.gguf model
         run: |
-          curl -L -o stories15M-q4_0.gguf https://huggingface.co/karpathy/tinyllamas/resolve/main/stories15M-q4_0.gguf
+          mkdir -p models
+          curl -L -o models/stories15M-q4_0.gguf https://huggingface.co/karpathy/tinyllamas/resolve/main/stories15M-q4_0.gguf
+          cp models/stories15M-q4_0.gguf ./stories15M-q4_0.gguf
 
       - name: Build llama.cpp baseline on Apple Silicon (pinned commit 961e4b2)
         run: |
