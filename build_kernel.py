@@ -125,15 +125,69 @@ def build_x86_64_kernels():
         obj_str = [str(p) for p in obj_files]
         cmd_link = ["gcc", "-shared", "-o", str(so_path)] + obj_str
         subprocess.run(cmd_link, check=True)
-        print(f"[SUCCESS] Built shared library with 6 kernels: {so_path}")
+        print(f"[SUCCESS] Built shared library: {so_path}")
         return so_path
 
 
+def build_arm64_kernels():
+    kernels_dir = PROJECT_ROOT / "src" / "kernels" / "arm64"
+    asm_files = sorted(kernels_dir.glob("*.S"))
+
+    obj_files = []
+    for asm_src in asm_files:
+        obj_path = BUILD_DIR / f"{asm_src.stem}.o"
+        print(f"[build_kernel] Assembling ARM64 NEON kernel {asm_src.name}...")
+        cmd_asm = ["clang", "-c", str(asm_src), "-o", str(obj_path)]
+        res_asm = subprocess.run(cmd_asm, capture_output=True, text=True)
+        if res_asm.returncode != 0:
+            print(f"[ERROR] clang assembly failed on {asm_src.name}:\n{res_asm.stderr}")
+            sys.exit(1)
+        obj_files.append(obj_path)
+
+    threadpool_c = PROJECT_ROOT / "src" / "runtime" / "threadpool.c"
+    threadpool_obj = BUILD_DIR / "threadpool.o"
+    print(f"[build_kernel] Compiling {threadpool_c.name}...")
+    cmd_tp = ["clang", "-c", "-O2", f"-I{PROJECT_ROOT / 'src' / 'runtime'}", str(threadpool_c), "-o", str(threadpool_obj)]
+    res_tp = subprocess.run(cmd_tp, capture_output=True, text=True)
+    if res_tp.returncode != 0:
+        print(f"[ERROR] threadpool.c compile failed:\n{res_tp.stderr}")
+        sys.exit(1)
+    obj_files.append(threadpool_obj)
+
+    ext = "dylib" if sys.platform == "darwin" else "so"
+    lib_path = BUILD_DIR / f"libasmllm.{ext}"
+    print(f"[build_kernel] Linking ARM64 shared library {lib_path.name}...")
+    cmd_link = ["clang", "-shared", "-o", str(lib_path)] + [str(p) for p in obj_files]
+    res_link = subprocess.run(cmd_link, capture_output=True, text=True)
+    if res_link.returncode != 0:
+        print(f"[ERROR] ARM64 link failed:\n{res_link.stderr}")
+        sys.exit(1)
+    print(f"[SUCCESS] Built ARM64 shared library: {lib_path}")
+
+    gguf_loader_c = PROJECT_ROOT / "src" / "loader" / "gguf_loader.c"
+    gguf_loader_lib = BUILD_DIR / f"gguf_loader.{ext}"
+    print(f"[build_kernel] Compiling {gguf_loader_c.name} to {gguf_loader_lib.name}...")
+    cmd_gguf = ["clang", "-shared", "-O2", f"-I{PROJECT_ROOT / 'src' / 'loader'}", str(gguf_loader_c), "-o", str(gguf_loader_lib)]
+    res_gguf = subprocess.run(cmd_gguf, capture_output=True, text=True)
+    if res_gguf.returncode != 0:
+        print(f"[ERROR] gguf_loader compile failed:\n{res_gguf.stderr}")
+        sys.exit(1)
+    print(f"[SUCCESS] Built GGUF loader library: {gguf_loader_lib}")
+    return lib_path
+
+
 def main():
+    import platform
     print("================================================================================")
     print(" asmllm Assembly Kernel Builder")
     print("================================================================================\n")
-    build_x86_64_kernels()
+    arch = platform.machine().lower()
+    if arch in ("arm64", "aarch64"):
+        print(f"[build_kernel] Detected ARM64 architecture ({arch}). Building NEON kernels...")
+        build_arm64_kernels()
+    else:
+        print(f"[build_kernel] Detected x86-64 architecture ({arch}). Building AVX2 kernels...")
+        build_x86_64_kernels()
 
 
 if __name__ == "__main__":

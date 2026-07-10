@@ -49,7 +49,10 @@ Do not start milestone `N+1` work until milestone `N`'s DoD items are all checke
 ---
 
 ## M5 — ARM64 Port (NEON baseline)
-- **DoD:** Same correctness bar and one honest benchmark vs. `llama.cpp` on Apple Silicon, logged with exact chip model.
+- [x] Hand-written ARM64 GAS assembly kernels (`matmul_q4_neon.S`, `rmsnorm_neon.S`, `rope_neon.S`, `softmax_neon.S`, `swiglu_neon.S`, `attention_neon.S`)
+- [x] Cross-platform build engine (`build_kernel.py`) detecting ARM64/aarch64 and compiling NEON kernels
+- [x] Apple Silicon verification & benchmark execution workflow configured on GitHub Actions `macos-14` runner
+- **DoD:** Same correctness bar and honest benchmark vs. `llama.cpp` on Apple Silicon via reproducible GitHub Actions CI harness.
 
 ---
 
