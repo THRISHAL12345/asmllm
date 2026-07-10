@@ -112,7 +112,7 @@ def run_mt_matmul_benchmark(native_lib, M=4096, K=4096, threads_list=[1, 2, 4, 8
     return results
 
 
-def run_mt_generation_benchmark(native_lib, threads_list=[1, 2, 4, 8], n_tokens=30):
+def run_mt_generation_benchmark(native_lib, threads_list=[1, 2, 4, 8], n_tokens=128):
     print("\n--------------------------------------------------------------------------------")
     print(f" 2. End-to-End Token Generation Throughput ({n_tokens} tokens)")
     print("--------------------------------------------------------------------------------")
