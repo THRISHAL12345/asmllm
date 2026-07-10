@@ -78,7 +78,7 @@ _asm_softmax:
     // Pass 3: Normalize y[i] /= sum
     fmov    s5, #1.0
     fdiv    s5, s5, s1           // inv_sum = 1 / sum
-    dup     v1.4s, v5
+    dup     v1.4s, v5.s[0]
 
     lsr     x20, x2, #2
     mov     x19, #0

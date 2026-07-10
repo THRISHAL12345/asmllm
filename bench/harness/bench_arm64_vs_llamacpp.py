@@ -99,18 +99,35 @@ def run_llamacpp_benchmark(gguf_path: Path, llama_bench_path: Path, threads_list
 
     # Parse t/s for each thread count from llama-bench output table
     results = {}
+    header_cols = []
     for line in raw_output.splitlines():
-        # Example format: | model | size | params | backend | threads | test | t/s |
-        if "tg128" in line or "128" in line:
-            parts = [p.strip() for p in line.split("|") if p.strip()]
+        line_str = line.strip()
+        if not line_str.startswith("|"):
+            continue
+        cols = [c.strip() for c in line_str.split("|") if c.strip()]
+        if "threads" in [c.lower() for c in cols] and "t/s" in [c.lower() for c in cols]:
+            header_cols = [c.lower() for c in cols]
+            continue
+        if "---" in line_str:
+            continue
+        if "tg128" in line_str or "128" in line_str:
             try:
-                # Look for thread count and t/s column
-                for part in parts:
-                    if part.replace(".", "", 1).isdigit() and float(part) > 10.0:
-                        # heuristic or explicit column parse
-                        pass
-            except Exception:
-                pass
+                threads_idx = header_cols.index("threads") if "threads" in header_cols else -3
+                ts_idx = header_cols.index("t/s") if "t/s" in header_cols else -1
+                threads_val = int(cols[threads_idx])
+                ts_str = cols[ts_idx].split("±")[0].strip()
+                results[threads_val] = float(ts_str)
+            except Exception as e:
+                # Robust fallback if column indices vary
+                try:
+                    ts_str = cols[-1].split("±")[0].strip()
+                    ts_val = float(ts_str)
+                    for c in cols:
+                        if c.isdigit() and int(c) in threads_list:
+                            results[int(c)] = ts_val
+                            break
+                except Exception:
+                    pass
 
     return results, "commit 961e4b2", raw_output
 
