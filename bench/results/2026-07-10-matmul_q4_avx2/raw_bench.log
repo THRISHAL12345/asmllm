@@ -1,0 +1,19 @@
+================================================================================
+ asmllm Q4_0 Matrix-Vector Multiply Microbenchmark
+================================================================================
+Hardware:        Intel(R) Core(TM) 5 210H (12 logical cores)
+OS/Platform:     Windows-11-10.0.26200-SP0
+Python Version:  3.14.0
+Matrix Size:     M=4096, K=4096 (128 Q4_0 blocks/row)
+Trials:          10 runs per kernel (median & spread reported)
+Frequency Lock:  Not explicitly locked (standard host runtime environment)
+--------------------------------------------------------------------------------
+Kernel Implementation                 Median (ms)    Spread (IQR)    Throughput (GFLOPS)
+--------------------------------------------------------------------------------
+asm_matmul_q4 (Hand-Written AVX2)        1.257 ms   � 0.212 ms      26.70 GFLOPS
+NumPy FP32 BLAS Reference Baseline       3.789 ms   � 0.311 ms       8.86 GFLOPS
+--------------------------------------------------------------------------------
+Result: Hand-written AVX2 Q4 kernel is 3.01x vs NumPy FP32 BLAS reference baseline.
+Numerical verification during bench: Max Error = 7.93e-04 (PASS <= 1e-2)
+
+[BENCH LOG SAVED] Raw log checked into: C:\Users\THRISHAL\asmllm\bench\results\2026-07-10-matmul_q4\raw_bench.log
