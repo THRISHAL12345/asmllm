@@ -104,7 +104,8 @@ _asm_rope:
     fdiv    s12, s12, s14
     fadd    s17, s17, s12
     fmul    s12, s12, s13
-    fmov    s14, #56.0           // 7*8
+    mov     w9, #56              // 7*8
+    scvtf   s14, w9
     fdiv    s12, s12, s14
     fadd    s17, s17, s12
 
@@ -121,11 +122,13 @@ _asm_rope:
     fdiv    s12, s12, s14
     fadd    s18, s18, s12
     fmul    s12, s12, s13
-    fmov    s14, #42.0           // 6*7
+    mov     w9, #42              // 6*7
+    scvtf   s14, w9
     fdiv    s12, s12, s14
     fadd    s18, s18, s12
     fmul    s12, s12, s13
-    fmov    s14, #72.0           // 8*9
+    mov     w9, #72              // 8*9
+    scvtf   s14, w9
     fdiv    s12, s12, s14
     fadd    s18, s18, s12
 
