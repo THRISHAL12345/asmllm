@@ -75,7 +75,7 @@ _asm_matmul_q5:
     scvtf   s2, w13
     ldr     s3, [x2, x22, lsl #2]
     fmul    s2, s2, s1
-    fmla    s0, s2, s3
+    fmadd   s0, s2, s3, s0
 
     add     x22, x22, #1
     b       .Lq5_inner

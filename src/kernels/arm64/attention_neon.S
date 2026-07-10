@@ -37,7 +37,7 @@ _asm_attention:
     add     x11, x1, x9, lsl #2
     ldr     s2, [x10]
     ldr     s3, [x11]
-    fmla    s1, s2, s3
+    fmadd   s1, s2, s3, s1
     add     x9, x9, #1
     b       .Lattn_dot
 

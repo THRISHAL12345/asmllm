@@ -81,7 +81,7 @@ _asm_rope:
     // integer round to zero
     fcvtzu  w10, s10
     ucvtf   s10, w10
-    fmls    s7, s10, s8          // angle in [0, 2pi)
+    fmsub   s7, s10, s8, s7      // angle in [0, 2pi)
 
     // Compute cos(angle) in s17 and sin(angle) in s18 using Taylor series
     // cos(x) = 1 - x^2/2! + x^4/4! - ...
@@ -135,9 +135,9 @@ _asm_rope:
     ldr     s21, [x9, #4]        // q1
 
     fmul    s22, s20, s17
-    fmls    s22, s21, s18        // q0_new = q0*cos - q1*sin
+    fmsub   s22, s21, s18, s22   // q0_new = q0*cos - q1*sin
     fmul    s23, s20, s18
-    fmla    s23, s21, s17        // q1_new = q0*sin + q1*cos
+    fmadd   s23, s21, s17, s23   // q1_new = q0*sin + q1*cos
 
     str     s22, [x9]
     str     s23, [x9, #4]
@@ -148,9 +148,9 @@ _asm_rope:
     ldr     s21, [x9, #4]        // k1
 
     fmul    s22, s20, s17
-    fmls    s22, s21, s18        // k0_new = k0*cos - k1*sin
+    fmsub   s22, s21, s18, s22   // k0_new = k0*cos - k1*sin
     fmul    s23, s20, s18
-    fmla    s23, s21, s17        // k1_new = k0*sin + k1*cos
+    fmadd   s23, s21, s17, s23   // k1_new = k0*sin + k1*cos
 
     str     s22, [x9]
     str     s23, [x9, #4]
