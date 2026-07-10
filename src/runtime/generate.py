@@ -142,7 +142,7 @@ class SmallLlamaModel:
         if found_gguf is None:
             target_path = Path("models/stories15M-q4_0.gguf")
             target_path.parent.mkdir(parents=True, exist_ok=True)
-            url = "https://huggingface.co/karpathy/tinyllamas/resolve/main/stories15M-q4_0.gguf"
+            url = "https://huggingface.co/ggml-org/tiny-llamas/resolve/main/stories15M-q4_0.gguf"
             print(f"[generate.py] Downloading GGUF checkpoint from {url}...")
             try:
                 import urllib.request
