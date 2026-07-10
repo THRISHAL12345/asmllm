@@ -505,3 +505,45 @@ ASMLLM_API void asm_threadpool_dispatch_q5(
     pthread_mutex_unlock(&g_mutex);
 #endif
 }
+
+#if !defined(_WIN32) && !defined(_WIN64)
+ASMLLM_API void asm_matmul_q8_mt(
+    const int8_t*  qweights,
+    const float*   scales,
+    const float*   x,
+    float*         y,
+    int64_t        M,
+    int64_t        K,
+    int            num_threads
+) {
+    if (num_threads <= 1 || M < 32) {
+        asm_matmul_q8(qweights, scales, x, y, M, K);
+        return;
+    }
+    if (g_pool_size != num_threads) {
+        asm_threadpool_init(num_threads);
+    }
+    asm_threadpool_dispatch_q8(qweights, scales, x, y, M, K);
+}
+
+ASMLLM_API void asm_matmul_q5_mt(
+    const uint8_t* ql,
+    const uint8_t* qh,
+    const float*   scales,
+    const float*   x,
+    float*         y,
+    int64_t        M,
+    int64_t        K,
+    int            num_threads
+) {
+    if (num_threads <= 1 || M < 32) {
+        asm_matmul_q5(ql, qh, scales, x, y, M, K);
+        return;
+    }
+    if (g_pool_size != num_threads) {
+        asm_threadpool_init(num_threads);
+    }
+    asm_threadpool_dispatch_q5(ql, qh, scales, x, y, M, K);
+}
+#endif
+

@@ -46,8 +46,6 @@ _asm_matmul_q8:
     add     x1, x1, #4
     dup     v1.4s, v1.s[0]
 
-    add     x0, x0, #2           // Skip 2-byte fp16 scale in Q8_0 block header
-
     // Process 32 int8 weights
     mov     x22, #0
 .Lq8_inner:

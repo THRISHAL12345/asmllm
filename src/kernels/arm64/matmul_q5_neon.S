@@ -6,12 +6,13 @@
  *
  * Signature:
  *   void asm_matmul_q5(
- *       const uint8_t* qweights, // x0: Q5_0 weight blocks (22 bytes per 32 weights)
- *       const float*   scales,   // x1: FP32 scales
- *       const float*   x,        // x2: FP32 input vector
- *       float*         y,        // x3: FP32 output vector
- *       int64_t        M,        // x4: rows
- *       int64_t        K         // x5: cols
+ *       const uint8_t* ql,     // x0: Q5_0 low nibbles (16 bytes per block of 32 weights)
+ *       const uint8_t* qh,     // x1: Q5_0 high bit flags (4 bytes per block of 32 weights)
+ *       const float*   scales, // x2: FP32 scales
+ *       const float*   x,      // x3: FP32 input vector
+ *       float*         y,      // x4: FP32 output vector
+ *       int64_t        M,      // x5: rows
+ *       int64_t        K       // x6: cols
  *   );
  */
 
@@ -27,11 +28,11 @@ _asm_matmul_q5:
     stp     x19, x20, [sp, 16]
     stp     x21, x22, [sp, 32]
 
-    lsr     x19, x5, #5          // num_blocks = K / 32
+    lsr     x19, x6, #5          // num_blocks = K / 32
 
     mov     x20, #0
 .Lrow_loop:
-    cmp     x20, x4
+    cmp     x20, x5              // cmp row index to M
     b.ge    .Ldone
 
     fmov    v0.4s, #1.0
@@ -42,13 +43,14 @@ _asm_matmul_q5:
     cmp     x21, x19
     b.ge    .Lblock_done
 
-    ldr     s1, [x1]
+    // Load 4 bytes of high bit flags from qh (x1)
+    ldr     w10, [x1]
     add     x1, x1, #4
-    dup     v1.4s, v1.s[0]
 
-    add     x0, x0, #2           // Skip 2-byte fp16 scale
-    ldr     w10, [x0]            // 4 bytes of high bit flags qh
-    add     x0, x0, #4           // Now at 16 bytes of low nibbles qs
+    // Load FP32 scale from scales (x2)
+    ldr     s1, [x2]
+    add     x2, x2, #4
+    dup     v1.4s, v1.s[0]
 
     mov     x22, #0
 .Lq5_inner:
@@ -73,7 +75,7 @@ _asm_matmul_q5:
 
     sub     w13, w13, #16        // bias 16 for Q5_0
     scvtf   s2, w13
-    ldr     s3, [x2, x22, lsl #2]
+    ldr     s3, [x3, x22, lsl #2] // input vector element from x (x3)
     fmul    s2, s2, s1
     fmadd   s0, s2, s3, s0
 
@@ -82,13 +84,13 @@ _asm_matmul_q5:
 
 .Lq5_inner_done:
     add     x0, x0, #16
-    add     x2, x2, #128
+    add     x3, x3, #128         // advance input vector x by 32 elements (128 bytes)
     add     x21, x21, #1
     b       .Lblock_loop
 
 .Lblock_done:
-    str     s0, [x3, x20, lsl #2]
-    sub     x2, x2, x5, lsl #2
+    str     s0, [x4, x20, lsl #2] // store to output y (x4)
+    sub     x3, x3, x6, lsl #2   // rewind input vector pointer x3 by K elements
     add     x20, x20, #1
     b       .Lrow_loop
 
