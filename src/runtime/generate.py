@@ -292,6 +292,10 @@ class ReferenceEngineForward:
         return logits
 
 
+def format_token_text(vocab_str: str) -> str:
+    return vocab_str.replace("▁", " ")
+
+
 def generate_end_to_end(n_tokens: int = 15):
     print("================================================================================")
     print(" asmllm Milestone M2: End-to-End Token Generation Verification")
@@ -306,20 +310,30 @@ def generate_end_to_end(n_tokens: int = 15):
     asm_engine = AsmEngineForward(model, native_lib)
     ref_engine = ReferenceEngineForward(model)
 
-    start_token = 1  # "asmllm"
-    asm_tokens = [start_token]
-    ref_tokens = [start_token]
+    # Prompt: "<s> Once upon a time"
+    prompt_tokens = [1, 9038, 2501, 263, 931]
+    prompt_words = [format_token_text(model.vocab[t]) for t in prompt_tokens]
+    print(f"Prompt Tokens: {prompt_tokens} -> '{''.join(prompt_words)}'\n")
 
-    print(f"Prompt Token: [{start_token}] -> '{model.vocab[start_token]}'\n")
-    print(f"{'Step':<6} {'asmllm Token ID':<17} {'asmllm Text':<18} {'Reference Token ID':<20} {'Exact Match?'}")
-    print("-" * 80)
+    asm_tokens = list(prompt_tokens)
+    ref_tokens = list(prompt_tokens)
 
-    curr_asm = start_token
-    curr_ref = start_token
+    # Feed prompt context
+    for step in range(len(prompt_tokens) - 1):
+        asm_engine.forward_token(prompt_tokens[step], pos=step)
+        ref_engine.forward_token(prompt_tokens[step], pos=step)
+
+    print(f"{'Step':<6} {'asmllm Token ID':<17} {'asmllm Text':<22} {'Reference Token ID':<20} {'Exact Match?'}")
+    print("-" * 85)
+
+    curr_asm = prompt_tokens[-1]
+    curr_ref = prompt_tokens[-1]
+    start_pos = len(prompt_tokens) - 1
 
     for step in range(n_tokens):
-        asm_logits = asm_engine.forward_token(curr_asm, pos=step)
-        ref_logits = ref_engine.forward_token(curr_ref, pos=step)
+        pos = start_pos + step
+        asm_logits = asm_engine.forward_token(curr_asm, pos=pos)
+        ref_logits = ref_engine.forward_token(curr_ref, pos=pos)
 
         next_asm = int(np.argmax(asm_logits))
         next_ref = int(np.argmax(ref_logits))
@@ -328,16 +342,15 @@ def generate_end_to_end(n_tokens: int = 15):
         ref_tokens.append(next_ref)
 
         match_str = "YES" if next_asm == next_ref else "NO (MISMATCH)"
-        safe_txt = model.vocab[next_asm].encode("ascii", errors="replace").decode("ascii")
-        txt = repr(safe_txt)
-        print(f"{step+1:<6} {next_asm:<17} {txt:<18} {next_ref:<20} {match_str}")
+        txt_display = repr(format_token_text(model.vocab[next_asm]))
+        print(f"{step+1:<6} {next_asm:<17} {txt_display:<22} {next_ref:<20} {match_str}")
 
         curr_asm = next_asm
         curr_ref = next_ref
 
-    print("-" * 80)
-    asm_text = "".join(model.vocab[tid] for tid in asm_tokens)
-    ref_text = "".join(model.vocab[tid] for tid in ref_tokens)
+    print("-" * 85)
+    asm_text = "".join(format_token_text(model.vocab[tid]) for tid in asm_tokens)
+    ref_text = "".join(format_token_text(model.vocab[tid]) for tid in ref_tokens)
 
     print(f"\nasmllm Generated Output Text:\n  {repr(asm_text)}")
     print(f"Reference Generated Output Text:\n  {repr(ref_text)}\n")
