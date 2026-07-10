@@ -40,6 +40,9 @@ def load_gguf_tensors_and_vocab(filepath: str):
     Parses GGUF v3 file header, extracts vocabulary, and maps tensor data offsets.
     """
     import struct
+    import os
+    if not os.path.exists(filepath) or os.path.getsize(filepath) < 24:
+        raise RuntimeError(f"GGUF file {filepath} is missing or incomplete (size < 24 bytes)")
     tensors = {}
     vocab = []
     with open(filepath, "rb") as f:
@@ -132,9 +135,22 @@ class SmallLlamaModel:
             Path(__file__).resolve().parent.parent.parent / "stories15M-q4_0.gguf",
             Path(__file__).resolve().parent.parent.parent / "models" / "stories15M-q4_0.gguf",
         ]:
-            if cand.exists():
+            if cand.exists() and cand.stat().st_size >= 1024:
                 found_gguf = cand
                 break
+
+        if found_gguf is None:
+            target_path = Path("models/stories15M-q4_0.gguf")
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            url = "https://huggingface.co/karpathy/tinyllamas/resolve/main/stories15M-q4_0.gguf"
+            print(f"[generate.py] Downloading GGUF checkpoint from {url}...")
+            try:
+                import urllib.request
+                urllib.request.urlretrieve(url, str(target_path))
+                if target_path.exists() and target_path.stat().st_size >= 1024:
+                    found_gguf = target_path
+            except Exception as e:
+                print(f"[generate.py] Download failed: {e}")
 
         if found_gguf is not None:
             gguf_path = str(found_gguf)
