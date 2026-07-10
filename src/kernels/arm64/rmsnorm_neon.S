@@ -26,7 +26,7 @@ _asm_rmsnorm:
     stp     x19, x20, [sp, 16]
 
     // 1. Compute sum of squares: sum(x[i] * x[i]) across dim
-    fmov    v1.4s, #0.0          // v1 = vector accumulator
+    movi    v1.4s, #0            // v1 = vector accumulator
     mov     x19, #0              // i = 0
 
     // Number of 4-float blocks
