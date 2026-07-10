@@ -39,8 +39,8 @@ jobs:
         run: |
           git clone https://github.com/ggerganov/llama.cpp.git
           cd llama.cpp && git checkout 961e4b2
-          cmake -B build -DGGML_BLAS=OFF -DCMAKE_BUILD_TYPE=Release
-          cmake --build build --config Release
+          cmake -B build -DGGML_BLAS=OFF -DCMAKE_BUILD_TYPE=Release -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_SERVER=OFF
+          cmake --build build --config Release --target llama-bench --parallel 4
 
       - name: Build ARM64 NEON Native Library
         run: |
