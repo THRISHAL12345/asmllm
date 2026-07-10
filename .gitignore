@@ -11,3 +11,6 @@ __pycache__/
 *.lib
 *.exp
 AGENTS.md
+models/
+external/
+fixes.txt
