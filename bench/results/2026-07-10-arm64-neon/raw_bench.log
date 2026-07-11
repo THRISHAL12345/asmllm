@@ -1,0 +1,40 @@
+asmllm ARM64 NEON vs llama.cpp Apple Silicon Benchmark Summary
+System Hardware: Darwin 23.6.0 (Apple M1 (Virtual), macOS 14, macos-14 GitHub Actions runner)
+Date: 2026-07-10
+llama.cpp: commit 961e4b2, built with -DGGML_BLAS=OFF -DGGML_METAL=OFF -DCMAKE_BUILD_TYPE=Release
+Runner Core Count: Unknown (sysctl hw.ncpu not captured — added in subsequent CI run)
+
+================================================================================
+ 1. asmllm ARM64 NEON Token Generation Throughput (128 tokens)
+================================================================================
+  asmllm (1T): 288.43 tokens/sec (median 443.78 ms)
+  asmllm (2T): 305.12 tokens/sec (median 419.51 ms)
+  asmllm (4T): 241.87 tokens/sec (median 529.24 ms)
+  asmllm (8T): 198.45 tokens/sec (median 645.01 ms)
+
+================================================================================
+ 2. llama.cpp Baseline Throughput (llama-bench, CPU backend, -DGGML_METAL=OFF)
+================================================================================
+Running command: ./llama.cpp/build/bin/llama-bench -m stories15M-q4_0.gguf -n 128 -p 0 -t 1,2,4,8
+| model                          |       size |     params | backend    | ngl | threads |          test |                  t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | --: | ------: | ------------: | -------------------: |
+| llama 15M Q4_0                 |   8.78 MiB |    15.01 M | CPU        |  -1 |       1 |         tg128 |      1933.47 ± 34.21 |
+| llama 15M Q4_0                 |   8.78 MiB |    15.01 M | CPU        |  -1 |       2 |         tg128 |      1821.55 ± 18.90 |
+| llama 15M Q4_0                 |   8.78 MiB |    15.01 M | CPU        |  -1 |       4 |         tg128 |         4.41 ± 0.05  |
+| llama 15M Q4_0                 |   8.78 MiB |    15.01 M | CPU        |  -1 |       8 |         tg128 |         0.71 ± 0.01  |
+
+NOTE ON 4T/8T DATA RELIABILITY:
+The GitHub Actions macos-14 runner reports "Apple M1 (Virtual)" — a virtualized
+environment with an unknown physical core count. The catastrophic throughput collapse
+at 4T (1933→4.41 t/s) and 8T (0.71 t/s) is consistent with thread oversubscription
+on a runner with fewer physical cores than requested threads, NOT a real performance
+characteristic of either engine. Only the 1T and 2T data points should be treated
+as trustworthy for comparison purposes.
+
+TRUSTWORTHY COMPARISON (1T, 2T only):
+  1T: asmllm 288.43 t/s vs llama.cpp 1933.47 t/s — asmllm is 6.7x slower
+  2T: asmllm 305.12 t/s vs llama.cpp 1821.55 t/s — asmllm is 6.0x slower
+
+This is an honest loss. llama.cpp's CPU NEON path benefits from years of hand-tuned
+NEON intrinsics, tiled matmul scheduling, and optimized memory access patterns.
+asmllm's ARM64 port is a first-generation hand-written GAS assembly implementation.

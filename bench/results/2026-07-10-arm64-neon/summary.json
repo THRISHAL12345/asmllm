@@ -1,0 +1,23 @@
+{
+  "date": "2026-07-10",
+  "system": "Darwin 23.6.0 (Apple M1 (Virtual), macOS 14, macos-14 GitHub Actions runner)",
+  "llama_cpp_commit": "961e4b2",
+  "llama_cpp_build_flags": "-DGGML_BLAS=OFF -DGGML_METAL=OFF -DCMAKE_BUILD_TYPE=Release",
+  "asmllm_neon_tps": {
+    "1": 288.43,
+    "2": 305.12,
+    "4": 241.87,
+    "8": 198.45
+  },
+  "llamacpp_cpu_tps": {
+    "1": 1933.47,
+    "2": 1821.55,
+    "4": 4.41,
+    "8": 0.71
+  },
+  "data_reliability_notes": "4T and 8T data points are unreliable due to thread oversubscription on a virtualized macOS runner with unknown physical core count. Only 1T and 2T comparisons are trustworthy.",
+  "trustworthy_comparison": {
+    "1T": "asmllm 288.43 t/s vs llama.cpp 1933.47 t/s — asmllm 6.7x slower",
+    "2T": "asmllm 305.12 t/s vs llama.cpp 1821.55 t/s — asmllm 6.0x slower"
+  }
+}

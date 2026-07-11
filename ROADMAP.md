@@ -52,7 +52,8 @@ Do not start milestone `N+1` work until milestone `N`'s DoD items are all checke
 - [x] Hand-written ARM64 GAS assembly kernels (`matmul_q4_neon.S`, `rmsnorm_neon.S`, `rope_neon.S`, `softmax_neon.S`, `swiglu_neon.S`, `attention_neon.S`) — *Evidenced by commits `dceb9c1`, `608efb2`, `b844f2d`*
 - [x] Cross-platform build engine (`build_kernel.py`) detecting ARM64/aarch64 and compiling NEON kernels — *Evidenced by commit `dceb9c1`*
 - [x] Apple Silicon verification & benchmark execution workflow configured on GitHub Actions `macos-14` runner — *Evidenced by commits `1944922`, `ee68ce9`, `3ff2685`*
-- **DoD:** Same correctness bar and honest benchmark vs. `llama.cpp` on Apple Silicon via reproducible GitHub Actions CI harness. — *Completed & logged in `BENCHMARKS.md` (`3ff2685`)*
+- [x] Honest benchmark vs. `llama.cpp` CPU NEON on Apple Silicon — *`asmllm` loses at 1T (288 t/s vs 1933 t/s, 6.7x slower) and 2T (305 t/s vs 1822 t/s, 6.0x slower). 4T/8T data unreliable due to virtualized runner oversubscription. Logged in `bench/results/2026-07-10-arm64-neon/raw_bench.log` and `BENCHMARKS.md`.*
+- **DoD:** Same correctness bar and honest benchmark vs. `llama.cpp` on Apple Silicon via reproducible GitHub Actions CI harness. — *Completed: correctness passes, benchmark logged honestly as a loss. Losing honestly is an acceptable outcome per AGENTS.md §5 M1 DoD precedent.*
 
 ---
 

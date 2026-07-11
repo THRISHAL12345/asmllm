@@ -14,7 +14,12 @@ import ctypes
 import os
 import sys
 from pathlib import Path
+import platform
 import numpy as np
+
+# Detect architecture for correct labeling in test output
+_ARCH = platform.machine().lower()
+_ISA_LABEL = "NEON" if _ARCH in ("arm64", "aarch64") else "AVX2"
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -105,7 +110,7 @@ def run_kernel_test(kernel_name: str, tolerance: float, ref_data: dict, native_l
 
         max_err = float(np.max(np.abs(y_asm - expected)))
         if max_err <= tolerance:
-            return "PASS", max_err, f"AVX2 assembly kernel verified (max err {max_err:.2e} <= {tolerance:.1e})"
+            return "PASS", max_err, f"{_ISA_LABEL} assembly kernel verified (max err {max_err:.2e} <= {tolerance:.1e})"
         else:
             return "FAIL", max_err, f"Max error {max_err:.2e} exceeded tolerance {tolerance:.1e}"
 
@@ -142,7 +147,7 @@ def run_kernel_test(kernel_name: str, tolerance: float, ref_data: dict, native_l
 
         max_err = float(np.max(np.abs(y_asm - expected)))
         if max_err <= tolerance:
-            return "PASS", max_err, f"Multi-threaded AVX2 kernel verified (4 threads, max err {max_err:.2e} <= {tolerance:.1e})"
+            return "PASS", max_err, f"Multi-threaded {_ISA_LABEL} kernel verified (4 threads, max err {max_err:.2e} <= {tolerance:.1e})"
         else:
             return "FAIL", max_err, f"Max error {max_err:.2e} exceeded tolerance {tolerance:.1e}"
 
@@ -177,7 +182,7 @@ def run_kernel_test(kernel_name: str, tolerance: float, ref_data: dict, native_l
 
         max_err = float(np.max(np.abs(y_asm - expected)))
         if max_err <= tolerance:
-            return "PASS", max_err, f"AVX2 Q8_0 kernel verified (max err {max_err:.2e} <= {tolerance:.1e})"
+            return "PASS", max_err, f"{_ISA_LABEL} Q8_0 kernel verified (max err {max_err:.2e} <= {tolerance:.1e})"
         else:
             return "FAIL", max_err, f"Max error {max_err:.2e} exceeded tolerance {tolerance:.1e}"
 
@@ -214,7 +219,7 @@ def run_kernel_test(kernel_name: str, tolerance: float, ref_data: dict, native_l
 
         max_err = float(np.max(np.abs(y_asm - expected)))
         if max_err <= tolerance:
-            return "PASS", max_err, f"Multi-threaded Q8_0 kernel verified (4 threads, max err {max_err:.2e} <= {tolerance:.1e})"
+            return "PASS", max_err, f"Multi-threaded {_ISA_LABEL} Q8_0 kernel verified (4 threads, max err {max_err:.2e} <= {tolerance:.1e})"
         else:
             return "FAIL", max_err, f"Max error {max_err:.2e} exceeded tolerance {tolerance:.1e}"
 
@@ -252,7 +257,7 @@ def run_kernel_test(kernel_name: str, tolerance: float, ref_data: dict, native_l
 
         max_err = float(np.max(np.abs(y_asm - expected)))
         if max_err <= tolerance:
-            return "PASS", max_err, f"AVX2 Q5_0 kernel verified (max err {max_err:.2e} <= {tolerance:.1e})"
+            return "PASS", max_err, f"{_ISA_LABEL} Q5_0 kernel verified (max err {max_err:.2e} <= {tolerance:.1e})"
         else:
             return "FAIL", max_err, f"Max error {max_err:.2e} exceeded tolerance {tolerance:.1e}"
 
@@ -292,7 +297,7 @@ def run_kernel_test(kernel_name: str, tolerance: float, ref_data: dict, native_l
 
         max_err = float(np.max(np.abs(y_asm - expected)))
         if max_err <= tolerance:
-            return "PASS", max_err, f"Multi-threaded Q5_0 kernel verified (4 threads, max err {max_err:.2e} <= {tolerance:.1e})"
+            return "PASS", max_err, f"Multi-threaded {_ISA_LABEL} Q5_0 kernel verified (4 threads, max err {max_err:.2e} <= {tolerance:.1e})"
         else:
             return "FAIL", max_err, f"Max error {max_err:.2e} exceeded tolerance {tolerance:.1e}"
 
@@ -316,7 +321,7 @@ def run_kernel_test(kernel_name: str, tolerance: float, ref_data: dict, native_l
 
         max_err = float(np.max(np.abs(y_asm - expected)))
         if max_err <= tolerance:
-            return "PASS", max_err, f"AVX2 assembly kernel verified (max err {max_err:.2e} <= {tolerance:.1e})"
+            return "PASS", max_err, f"{_ISA_LABEL} assembly kernel verified (max err {max_err:.2e} <= {tolerance:.1e})"
         else:
             return "FAIL", max_err, f"Max error {max_err:.2e} exceeded tolerance {tolerance:.1e}"
 
@@ -340,7 +345,7 @@ def run_kernel_test(kernel_name: str, tolerance: float, ref_data: dict, native_l
 
         max_err = float(max(np.max(np.abs(q - exp_q)), np.max(np.abs(k - exp_k))))
         if max_err <= tolerance:
-            return "PASS", max_err, f"AVX2 assembly kernel verified (max err {max_err:.2e} <= {tolerance:.1e})"
+            return "PASS", max_err, f"{_ISA_LABEL} assembly kernel verified (max err {max_err:.2e} <= {tolerance:.1e})"
         else:
             return "FAIL", max_err, f"Max error {max_err:.2e} exceeded tolerance {tolerance:.1e}"
 
@@ -356,7 +361,7 @@ def run_kernel_test(kernel_name: str, tolerance: float, ref_data: dict, native_l
 
         max_err = float(np.max(np.abs(y_asm - expected)))
         if max_err <= tolerance:
-            return "PASS", max_err, f"AVX2 assembly kernel verified (max err {max_err:.2e} <= {tolerance:.1e})"
+            return "PASS", max_err, f"{_ISA_LABEL} assembly kernel verified (max err {max_err:.2e} <= {tolerance:.1e})"
         else:
             return "FAIL", max_err, f"Max error {max_err:.2e} exceeded tolerance {tolerance:.1e}"
 
@@ -391,7 +396,7 @@ def run_kernel_test(kernel_name: str, tolerance: float, ref_data: dict, native_l
 
         max_err = float(np.max(np.abs(y_asm - expected)))
         if max_err <= tolerance:
-            return "PASS", max_err, f"AVX2 assembly kernel verified (max err {max_err:.2e} <= {tolerance:.1e})"
+            return "PASS", max_err, f"{_ISA_LABEL} assembly kernel verified (max err {max_err:.2e} <= {tolerance:.1e})"
         else:
             return "FAIL", max_err, f"Max error {max_err:.2e} exceeded tolerance {tolerance:.1e}"
 

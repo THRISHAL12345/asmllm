@@ -18,6 +18,21 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Runner hardware diagnostics
+        run: |
+          echo "=== CPU Brand ==="
+          sysctl -n machdep.cpu.brand_string || true
+          echo "=== Physical Cores (hw.physicalcpu) ==="
+          sysctl -n hw.physicalcpu || true
+          echo "=== Logical Cores (hw.ncpu) ==="
+          sysctl -n hw.ncpu || true
+          echo "=== hw.logicalcpu ==="
+          sysctl -n hw.logicalcpu || true
+          echo "=== Memory ==="
+          sysctl -n hw.memsize || true
+          echo "=== macOS Version ==="
+          sw_vers || true
+
       - name: Setup Python 3.12
         uses: actions/setup-python@v5
         with:
