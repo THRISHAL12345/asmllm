@@ -24,12 +24,13 @@
 
 asm_matmul_q4:
 _asm_matmul_q4:
-    stp     x29, x30, [sp, -80]!
+    stp     x29, x30, [sp, -96]!
     mov     x29, sp
     stp     x19, x20, [sp, 16]
     stp     x21, x22, [sp, 32]
     stp     x23, x24, [sp, 48]
     stp     x25, x26, [sp, 64]
+    stp     x27, x28, [sp, 80]
 
     // x19 = K / 32 (number of blocks per row)
     lsr     x19, x5, #5
@@ -317,9 +318,10 @@ _asm_matmul_q4:
 
 .Ldone:
     add     sp, sp, x22         // deallocate dynamic stack
+    ldp     x27, x28, [sp, 80]
     ldp     x25, x26, [sp, 64]
     ldp     x23, x24, [sp, 48]
     ldp     x21, x22, [sp, 32]
     ldp     x19, x20, [sp, 16]
-    ldp     x29, x30, [sp], 80
+    ldp     x29, x30, [sp], 96
     ret
