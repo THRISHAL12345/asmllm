@@ -1,0 +1,7 @@
+Date: 2026-07-27T18:04:54.568885
+CPU:  arm (3 logical cores)
+Dimensions: M=4096, K=4096
+asm_matmul_q4 (AVX2): 6.233 ms (IQR ±1.808 ms), 5.38 GFLOPS
+Reference Baseline:   2.087 ms (IQR ±0.329 ms), 16.08 GFLOPS
+Speedup vs reference: 0.33x
+Max Error: 1.04e-03
