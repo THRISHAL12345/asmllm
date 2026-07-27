@@ -13,6 +13,7 @@ Runs end-to-end with zero kernels implemented yet (all show as "NOT IMPLEMENTED"
 import ctypes
 import os
 import sys
+import argparse
 from pathlib import Path
 import platform
 import numpy as np
@@ -111,6 +112,41 @@ def run_kernel_test(kernel_name: str, tolerance: float, ref_data: dict, native_l
         max_err = float(np.max(np.abs(y_asm - expected)))
         if max_err <= tolerance:
             return "PASS", max_err, f"{_ISA_LABEL} assembly kernel verified (max err {max_err:.2e} <= {tolerance:.1e})"
+        else:
+            return "FAIL", max_err, f"Max error {max_err:.2e} exceeded tolerance {tolerance:.1e}"
+
+    elif kernel_name == "matmul_q4_avx512":
+        qweights = np.ascontiguousarray(ref_data["q4_matmul_qweights"], dtype=np.uint8)
+        scales = np.ascontiguousarray(ref_data["q4_matmul_scales"], dtype=np.float32)
+        x_vec = np.ascontiguousarray(ref_data["q4_matmul_x"], dtype=np.float32)
+        expected = ref_data["q4_matmul_expected"]
+
+        M = qweights.shape[0]
+        K = x_vec.shape[0]
+        y_asm = np.zeros(M, dtype=np.float32)
+
+        func.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_int64,
+            ctypes.c_int64,
+        ]
+        func.restype = None
+
+        func(
+            qweights.ctypes.data,
+            scales.ctypes.data,
+            x_vec.ctypes.data,
+            y_asm.ctypes.data,
+            int(M),
+            int(K),
+        )
+
+        max_err = float(np.max(np.abs(y_asm - expected)))
+        if max_err <= tolerance:
+            return "PASS", max_err, f"AVX-512 assembly kernel verified (max err {max_err:.2e} <= {tolerance:.1e})"
         else:
             return "FAIL", max_err, f"Max error {max_err:.2e} exceeded tolerance {tolerance:.1e}"
 
@@ -404,6 +440,13 @@ def run_kernel_test(kernel_name: str, tolerance: float, ref_data: dict, native_l
 
 
 def main():
+    parser = argparse.ArgumentParser(description="asmllm Correctness Test Runner")
+    parser.add_argument("--avx512", action="store_true", help="Include AVX-512 kernels in the test suite")
+    args = parser.parse_args()
+
+    if args.avx512:
+        KERNELS.append(("matmul_q4_avx512", TOLERANCE_Q4, "Q4_0 Quantized Matrix-Vector Multiplication (AVX-512)"))
+
     print("================================================================================")
     print(" asmllm Correctness Test Runner (Numerical Compliance)")
     print("================================================================================\n")

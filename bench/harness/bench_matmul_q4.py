@@ -11,6 +11,7 @@ import os
 import platform
 import statistics
 import sys
+import argparse
 import time
 from datetime import datetime
 from pathlib import Path
@@ -39,9 +40,12 @@ def get_cpu_info() -> str:
         return f"Unknown CPU ({os.cpu_count()} logical cores)"
 
 
-def benchmark_q4_matvec(M: int = 4096, K: int = 4096, num_trials: int = 10):
+def benchmark_q4_matvec(M: int = 4096, K: int = 4096, num_trials: int = 10, avx512: bool = False):
+    kernel_name = "asm_matmul_q4_avx512" if avx512 else "asm_matmul_q4"
+    isa_label = "AVX-512" if avx512 else "AVX2"
+    
     print("================================================================================")
-    print(" asmllm Q4_0 Matrix-Vector Multiply Microbenchmark")
+    print(f" asmllm Q4_0 Matrix-Vector Multiply Microbenchmark ({isa_label})")
     print("================================================================================")
 
     cpu_info = get_cpu_info()
@@ -54,11 +58,11 @@ def benchmark_q4_matvec(M: int = 4096, K: int = 4096, num_trials: int = 10):
     print("--------------------------------------------------------------------------------")
 
     native_lib = try_load_native_library()
-    if not native_lib or not hasattr(native_lib, "asm_matmul_q4"):
-        print("[ERROR] Could not load asm_matmul_q4 symbol from native library.")
+    if not native_lib or not hasattr(native_lib, kernel_name):
+        print(f"[ERROR] Could not load {kernel_name} symbol from native library.")
         sys.exit(1)
 
-    func = native_lib.asm_matmul_q4
+    func = getattr(native_lib, kernel_name)
     func.argtypes = [
         ctypes.c_void_p,
         ctypes.c_void_p,
@@ -133,12 +137,12 @@ def benchmark_q4_matvec(M: int = 4096, K: int = 4096, num_trials: int = 10):
 
     print(f"Kernel Implementation                 Median (ms)    Spread (IQR)    Throughput (GFLOPS)")
     print("--------------------------------------------------------------------------------")
-    print(f"asm_matmul_q4 (Hand-Written AVX2)    {asm_med:9.3f} ms   ±{asm_iqr:6.3f} ms   {asm_gflops:8.2f} GFLOPS")
+    print(f"{kernel_name:<36} {asm_med:9.3f} ms   ±{asm_iqr:6.3f} ms   {asm_gflops:8.2f} GFLOPS")
     print(f"NumPy FP32 BLAS Reference Baseline   {ref_med:9.3f} ms   ±{ref_iqr:6.3f} ms   {ref_gflops:8.2f} GFLOPS")
     print("--------------------------------------------------------------------------------")
 
     speedup = ref_med / asm_med
-    print(f"Result: Hand-written AVX2 Q4 kernel is {speedup:.2f}x vs NumPy FP32 BLAS reference baseline.")
+    print(f"Result: Hand-written {isa_label} Q4 kernel is {speedup:.2f}x vs NumPy FP32 BLAS reference baseline.")
     print(f"Numerical verification during bench: Max Error = {err:.2e} (PASS <= 1e-2)\n")
 
     return {
@@ -157,7 +161,11 @@ def benchmark_q4_matvec(M: int = 4096, K: int = 4096, num_trials: int = 10):
 
 
 def main():
-    res = benchmark_q4_matvec(M=4096, K=4096, num_trials=10)
+    parser = argparse.ArgumentParser(description="asmllm Q4 Bench")
+    parser.add_argument("--avx512", action="store_true", help="Benchmark AVX-512 instead of AVX2")
+    args = parser.parse_args()
+
+    res = benchmark_q4_matvec(M=4096, K=4096, num_trials=10, avx512=args.avx512)
 
     # Save log to bench/results/<date>-matmul_q4/
     date_str = datetime.now().strftime("%Y-%m-%d")
@@ -169,7 +177,9 @@ def main():
         f.write(f"Date: {datetime.now().isoformat()}\n")
         f.write(f"CPU:  {res['cpu_info']}\n")
         f.write(f"Dimensions: M={res['M']}, K={res['K']}\n")
-        f.write(f"asm_matmul_q4 (AVX2): {res['asm_med']:.3f} ms (IQR ±{res['asm_iqr']:.3f} ms), {res['asm_gflops']:.2f} GFLOPS\n")
+        
+        isa_label = "AVX-512" if args.avx512 else "AVX2"
+        f.write(f"asm_matmul_q4 ({isa_label}): {res['asm_med']:.3f} ms (IQR ±{res['asm_iqr']:.3f} ms), {res['asm_gflops']:.2f} GFLOPS\n")
         f.write(f"Reference Baseline:   {res['ref_med']:.3f} ms (IQR ±{res['ref_iqr']:.3f} ms), {res['ref_gflops']:.2f} GFLOPS\n")
         f.write(f"Speedup vs reference: {res['speedup']:.2f}x\n")
         f.write(f"Max Error: {res['err']:.2e}\n")

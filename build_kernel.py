@@ -9,6 +9,7 @@ Works cross-platform (Windows x64 / Linux x86-64).
 import os
 import subprocess
 import sys
+import argparse
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -35,10 +36,15 @@ def find_msvc_vcvars() -> str | None:
     return None
 
 
-def build_x86_64_kernels():
+def build_x86_64_kernels(avx512_enabled: bool = False):
     nasm_bin = find_nasm()
     kernels_dir = PROJECT_ROOT / "src" / "kernels" / "x86_64"
-    asm_files = sorted(kernels_dir.glob("*.asm"))
+    all_asm = sorted(kernels_dir.glob("*.asm"))
+    
+    if avx512_enabled:
+        asm_files = all_asm
+    else:
+        asm_files = [f for f in all_asm if not f.name.endswith("_avx512.asm")]
 
     obj_files = []
     fmt = "win64" if sys.platform == "win32" else "elf64"
@@ -63,9 +69,10 @@ def build_x86_64_kernels():
         threadpool_c = PROJECT_ROOT / "src" / "runtime" / "threadpool.c"
         threadpool_obj = BUILD_DIR / "threadpool.obj"
 
+        cflags_msvc = ' /D AVX512_ENABLED' if avx512_enabled else ''
         print(f"[build_kernel] Compiling {threadpool_c.name} via MSVC cl.exe...")
         cl_cmd = (
-            f'"{vcvars}" && cl.exe /nologo /c /O2 /MD /I"{PROJECT_ROOT / "src" / "runtime"}" '
+            f'"{vcvars}" && cl.exe /nologo /c /O2 /MD{cflags_msvc} /I"{PROJECT_ROOT / "src" / "runtime"}" '
             f'"{threadpool_c}" /Fo"{threadpool_obj}"'
         )
         res_cl = subprocess.run(cl_cmd, shell=True, capture_output=True, text=True)
@@ -93,6 +100,8 @@ def build_x86_64_kernels():
             " /EXPORT:asm_threadpool_dispatch_q5"
             " /EXPORT:asm_threadpool_get_num_threads"
         )
+        if avx512_enabled:
+            exports += " /EXPORT:asm_matmul_q4_avx512"
 
         print(f"[build_kernel] Linking {dll_path.name} via MSVC link.exe...")
         link_cmd = f'"{vcvars}" && link.exe /DLL /nologo {exports} {obj_str} /OUT:"{dll_path}"'
@@ -122,8 +131,9 @@ def build_x86_64_kernels():
     else:
         so_path = BUILD_DIR / "libasmllm.so"
         print(f"[build_kernel] Linking {so_path.name}...")
+        cflags_gcc = ["-DAVX512_ENABLED"] if avx512_enabled else []
         obj_str = [str(p) for p in obj_files]
-        cmd_link = ["gcc", "-shared", "-o", str(so_path)] + obj_str
+        cmd_link = ["gcc", "-shared", "-o", str(so_path)] + obj_str + cflags_gcc
         subprocess.run(cmd_link, check=True)
         print(f"[SUCCESS] Built shared library: {so_path}")
         return so_path
@@ -178,16 +188,24 @@ def build_arm64_kernels():
 
 def main():
     import platform
+    parser = argparse.ArgumentParser(description="asmllm Assembly Kernel Builder")
+    parser.add_argument("--avx512", action="store_true", help="Enable AVX-512 advanced path kernels (x86_64 only)")
+    args = parser.parse_args()
+
     print("================================================================================")
     print(" asmllm Assembly Kernel Builder")
     print("================================================================================\n")
     arch = platform.machine().lower()
     if arch in ("arm64", "aarch64"):
         print(f"[build_kernel] Detected ARM64 architecture ({arch}). Building NEON kernels...")
+        if args.avx512:
+            print("[WARNING] --avx512 ignored on ARM64.")
         build_arm64_kernels()
     else:
         print(f"[build_kernel] Detected x86-64 architecture ({arch}). Building AVX2 kernels...")
-        build_x86_64_kernels()
+        if args.avx512:
+            print("[build_kernel] AVX-512 advanced path ENABLED.")
+        build_x86_64_kernels(avx512_enabled=args.avx512)
 
 
 if __name__ == "__main__":

@@ -34,6 +34,17 @@ extern void asm_matmul_q4(
     int64_t        K
 );
 
+#ifdef AVX512_ENABLED
+extern void asm_matmul_q4_avx512(
+    const uint8_t* qweights,
+    const float*   scales,
+    const float*   x,
+    float*         y,
+    int64_t        M,
+    int64_t        K
+);
+#endif
+
 extern void asm_matmul_q8(
     const int8_t*  qweights,
     const float*   scales,
@@ -107,6 +118,12 @@ static DWORD WINAPI worker_main_win32(LPVOID arg) {
                 int64_t q_bytes_per_row = task->K / 2;
                 const uint8_t* q_tile = task->qweights + task->row_start * q_bytes_per_row;
                 asm_matmul_q4(q_tile, s_tile, task->x, y_tile, row_count, task->K);
+#ifdef AVX512_ENABLED
+            } else if (task->quant_type == 3) {
+                int64_t q_bytes_per_row = task->K / 2;
+                const uint8_t* q_tile = task->qweights + task->row_start * q_bytes_per_row;
+                asm_matmul_q4_avx512(q_tile, s_tile, task->x, y_tile, row_count, task->K);
+#endif
             } else if (task->quant_type == 1) {
                 int64_t q_bytes_per_row = task->K;
                 const int8_t* q_tile = (const int8_t*)task->qweights + task->row_start * q_bytes_per_row;
@@ -216,6 +233,12 @@ static void* worker_main_posix(void* arg) {
                 int64_t q_bytes_per_row = task->K / 2;
                 const uint8_t* q_tile = task->qweights + task->row_start * q_bytes_per_row;
                 asm_matmul_q4(q_tile, s_tile, task->x, y_tile, row_count, task->K);
+#ifdef AVX512_ENABLED
+            } else if (task->quant_type == 3) {
+                int64_t q_bytes_per_row = task->K / 2;
+                const uint8_t* q_tile = task->qweights + task->row_start * q_bytes_per_row;
+                asm_matmul_q4_avx512(q_tile, s_tile, task->x, y_tile, row_count, task->K);
+#endif
             } else if (task->quant_type == 1) {
                 int64_t q_bytes_per_row = task->K;
                 const int8_t* q_tile = (const int8_t*)task->qweights + task->row_start * q_bytes_per_row;
@@ -360,6 +383,83 @@ ASMLLM_API void asm_matmul_q4_mt(
     pthread_mutex_unlock(&g_mutex);
 #endif
 }
+
+#ifdef AVX512_ENABLED
+ASMLLM_API void asm_matmul_q4_avx512_mt(
+    const uint8_t* qweights,
+    const float*   scales,
+    const float*   x,
+    float*         y,
+    int64_t        M,
+    int64_t        K,
+    int            num_threads
+) {
+    if (num_threads <= 1 || M < 32) {
+        asm_matmul_q4_avx512(qweights, scales, x, y, M, K);
+        return;
+    }
+
+    if (g_pool_size != num_threads) {
+        asm_threadpool_init(num_threads);
+    }
+
+    int64_t align_rows = 16;
+    int64_t tile_rows = (M + num_threads - 1) / num_threads;
+    tile_rows = ((tile_rows + align_rows - 1) / align_rows) * align_rows;
+
+#if defined(_WIN32) || defined(_WIN64)
+    HANDLE done_events[MAX_WORKERS];
+    for (int i = 0; i < num_threads; i++) {
+        int64_t r_start = (int64_t)i * tile_rows;
+        int64_t r_end   = r_start + tile_rows;
+        if (r_start > M) r_start = M;
+        if (r_end > M)   r_end = M;
+
+        g_tasks[i].qweights  = qweights;
+        g_tasks[i].scales    = scales;
+        g_tasks[i].x         = x;
+        g_tasks[i].y         = y;
+        g_tasks[i].M         = M;
+        g_tasks[i].K         = K;
+        g_tasks[i].row_start = r_start;
+        g_tasks[i].row_end   = r_end;
+        g_tasks[i].quant_type = 3; // AVX512 Q4_0
+        done_events[i]       = g_tasks[i].done_event;
+        SetEvent(g_tasks[i].start_event);
+    }
+
+    WaitForMultipleObjects((DWORD)num_threads, done_events, TRUE, INFINITE);
+#else
+    pthread_mutex_lock(&g_mutex);
+    for (int i = 0; i < num_threads; i++) {
+        int64_t r_start = (int64_t)i * tile_rows;
+        int64_t r_end   = r_start + tile_rows;
+        if (r_start > M) r_start = M;
+        if (r_end > M)   r_end = M;
+
+        g_tasks[i].qweights  = qweights;
+        g_tasks[i].scales    = scales;
+        g_tasks[i].x         = x;
+        g_tasks[i].y         = y;
+        g_tasks[i].M         = M;
+        g_tasks[i].K         = K;
+        g_tasks[i].row_start = r_start;
+        g_tasks[i].row_end   = r_end;
+        g_tasks[i].quant_type = 3;
+        g_tasks[i].task_ready = 1;
+    }
+
+    pthread_cond_broadcast(&g_start_cond);
+
+    for (int i = 0; i < num_threads; i++) {
+        while (g_tasks[i].task_ready) {
+            pthread_cond_wait(&g_done_cond, &g_mutex);
+        }
+    }
+    pthread_mutex_unlock(&g_mutex);
+#endif
+}
+#endif
 
 ASMLLM_API void asm_threadpool_dispatch_q8(
     const int8_t*  qweights,

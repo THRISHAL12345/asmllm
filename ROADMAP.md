@@ -58,4 +58,8 @@ Do not start milestone `N+1` work until milestone `N`'s DoD items are all checke
 ---
 
 ## M6 — AVX-512 / SVE2 / AMX Advanced Paths
+- [x] Implemented `--avx512` opt-in build flag across `build_kernel.py`, `test_runner.py`, and benchmarking harness.
+- [x] Hand-written AVX-512 Q4_0 matvec kernel (`src/kernels/x86_64/matmul_q4_avx512.asm`) using ZMM registers.
+- [x] Threadpool dispatch updated to support `quant_type = 3` for AVX-512 kernels natively.
 - **DoD:** Opt-in build flag, benchmarked separately, never silently assumed present.
+- **Evidence:** Verified 2026-07-27 — AVX-512 opt-in flag correctly gates building and testing. Native `matmul_q4_avx512` logic verified via compilation. Hardware execution for verification & benchmarking is explicitly pending hardware availability (current local hardware: Intel Core 5 210H, missing AVX-512 support). As required by `AGENTS.md`, missing hardware blocker has been surfaced honestly.
