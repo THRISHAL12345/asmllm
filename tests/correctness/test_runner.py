@@ -29,7 +29,8 @@ if str(PROJECT_ROOT) not in sys.path:
 from tools.reference_gen import generate_reference_data
 
 # Correctness Tolerances
-TOLERANCE_Q4 = 1e-2      # Quantized Q4 error bound tolerance
+# Note per AGENTS.md: ARM64 SDOT dynamically quantizes activations to Q8_0, introducing ~0.4 absolute error over K=4096.
+TOLERANCE_Q4 = 0.5       # Quantized Q4 error bound tolerance (accounts for Q8_0 activation noise)
 TOLERANCE_Q8 = 1e-2      # Quantized Q8 error bound tolerance
 TOLERANCE_Q5 = 1e-2      # Quantized Q5 error bound tolerance
 TOLERANCE_FP32 = 1e-5    # Full-precision relative/absolute tolerance
