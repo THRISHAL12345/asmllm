@@ -85,7 +85,8 @@ _asm_matmul_q4:
     fmaxv   s16, v16.4s         // s16 = max_abs_val
 
     // Compute scale = max_abs_val / 127.0
-    fmov    s17, #127.0
+    mov     w17, #127
+    scvtf   s17, w17
     fdiv    s18, s16, s17       // s18 = scale
     str     s18, [x11], #4      // store scale
 
