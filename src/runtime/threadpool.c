@@ -15,15 +15,36 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+
 #if defined(_WIN32) || defined(_WIN64)
   #define WIN32_LEAN_AND_MEAN
   #include <windows.h>
+  #include <intrin.h> // for YieldProcessor
+  #define ATOMIC_INC(ptr) InterlockedIncrement((volatile LONG*)(ptr))
+  #define ATOMIC_ADD(ptr, val) InterlockedExchangeAdd((volatile LONG*)(ptr), (val))
+  #define ATOMIC_SET(ptr, val) InterlockedExchange((volatile LONG*)(ptr), (val))
+  #define ATOMIC_GET(ptr) InterlockedCompareExchange((volatile LONG*)(ptr), 0, 0)
+  #define THREAD_YIELD() YieldProcessor()
 #else
   #define _GNU_SOURCE
   #include <pthread.h>
   #include <unistd.h>
   #include <sched.h>
+  #include <stdatomic.h>
+  #if defined(__x86_64__)
+    #include <immintrin.h> // for _mm_pause
+    #define THREAD_YIELD() _mm_pause()
+  #elif defined(__aarch64__)
+    #define THREAD_YIELD() asm volatile("yield" ::: "memory")
+  #else
+    #define THREAD_YIELD() sched_yield()
+  #endif
+  #define ATOMIC_INC(ptr) atomic_fetch_add_explicit((volatile _Atomic long*)(ptr), 1, memory_order_acq_rel)
+  #define ATOMIC_ADD(ptr, val) atomic_fetch_add_explicit((volatile _Atomic long*)(ptr), (val), memory_order_acq_rel)
+  #define ATOMIC_SET(ptr, val) atomic_store_explicit((volatile _Atomic long*)(ptr), (val), memory_order_release)
+  #define ATOMIC_GET(ptr) atomic_load_explicit((volatile _Atomic long*)(ptr), memory_order_acquire)
 #endif
+
 
 extern void asm_matmul_q4(
     const uint8_t* qweights,
@@ -71,6 +92,7 @@ typedef struct {
     int core_id;
     volatile int task_ready;
     int quant_type; // 0 = Q4_0, 1 = Q8_0, 2 = Q5_0
+    long last_gen;
 
 #if defined(_WIN32) || defined(_WIN64)
     HANDLE start_event;
@@ -93,6 +115,11 @@ static volatile int g_pool_size = 0;
 static volatile int g_shutdown = 0;
 static volatile int g_ready_workers = 0;
 
+static volatile long g_task_generation = 0;
+static volatile long g_workers_completed = 0;
+static volatile long g_sleeping_workers = 0;
+
+
 #if defined(_WIN32) || defined(_WIN64)
 
 static HANDLE g_threads[MAX_WORKERS];
@@ -105,8 +132,26 @@ static DWORD WINAPI worker_main_win32(LPVOID arg) {
     SetEvent(g_ready_event);
 
     while (1) {
-        WaitForSingleObject(task->start_event, INFINITE);
-        if (g_shutdown) break;
+        long current_gen;
+        int spin_count = 0;
+        while ((current_gen = ATOMIC_GET(&g_task_generation)) == task->last_gen) {
+            if (g_shutdown) return 0;
+            if (spin_count < 5000) {
+                THREAD_YIELD();
+                spin_count++;
+            } else {
+                ATOMIC_INC(&g_sleeping_workers);
+                if (ATOMIC_GET(&g_task_generation) != task->last_gen) {
+                    ATOMIC_ADD(&g_sleeping_workers, -1);
+                    continue;
+                }
+                WaitForSingleObject(task->start_event, INFINITE);
+                ATOMIC_ADD(&g_sleeping_workers, -1);
+                spin_count = 0;
+            }
+        }
+        if (g_shutdown) return 0;
+        task->last_gen = current_gen;
 
         int64_t row_count = task->row_end - task->row_start;
         if (row_count > 0) {
@@ -137,7 +182,7 @@ static DWORD WINAPI worker_main_win32(LPVOID arg) {
             }
         }
 
-        SetEvent(task->done_event);
+        ATOMIC_INC(&g_workers_completed);
     }
     return 0;
 }
@@ -166,6 +211,7 @@ ASMLLM_API void asm_threadpool_init(int num_threads) {
     for (int i = 0; i < num_threads; i++) {
         g_tasks[i].thread_id = i;
         g_tasks[i].core_id = i;
+        g_tasks[i].last_gen = ATOMIC_GET(&g_task_generation);
         g_threads[i] = CreateThread(NULL, 0, worker_main_win32, &g_tasks[i], 0, NULL);
     }
 
@@ -213,15 +259,26 @@ static void* worker_main_posix(void* arg) {
     pthread_mutex_unlock(&g_mutex);
 
     while (1) {
-        pthread_mutex_lock(&g_mutex);
-        while (!task->task_ready && !g_shutdown) {
-            pthread_cond_wait(&g_start_cond, &g_mutex);
+        long current_gen;
+        int spin_count = 0;
+        while ((current_gen = ATOMIC_GET(&g_task_generation)) == task->last_gen) {
+            if (g_shutdown) return NULL;
+            if (spin_count < 5000) {
+                THREAD_YIELD();
+                spin_count++;
+            } else {
+                pthread_mutex_lock(&g_mutex);
+                ATOMIC_INC(&g_sleeping_workers);
+                while (ATOMIC_GET(&g_task_generation) == task->last_gen && !g_shutdown) {
+                    pthread_cond_wait(&g_start_cond, &g_mutex);
+                }
+                ATOMIC_ADD(&g_sleeping_workers, -1);
+                pthread_mutex_unlock(&g_mutex);
+                spin_count = 0;
+            }
         }
-        if (g_shutdown) {
-            pthread_mutex_unlock(&g_mutex);
-            break;
-        }
-        pthread_mutex_unlock(&g_mutex);
+        if (g_shutdown) return NULL;
+        task->last_gen = current_gen;
 
         int64_t row_count = task->row_end - task->row_start;
         if (row_count > 0) {
@@ -252,10 +309,7 @@ static void* worker_main_posix(void* arg) {
             }
         }
 
-        pthread_mutex_lock(&g_mutex);
-        task->task_ready = 0;
-        pthread_cond_broadcast(&g_done_cond);
-        pthread_mutex_unlock(&g_mutex);
+        ATOMIC_INC(&g_workers_completed);
     }
     return NULL;
 }
@@ -274,6 +328,7 @@ ASMLLM_API void asm_threadpool_init(int num_threads) {
     g_pool_size = num_threads;
     for (int i = 0; i < num_threads; i++) {
         g_tasks[i].task_ready = 0;
+        g_tasks[i].last_gen = ATOMIC_GET(&g_task_generation);
     }
     pthread_mutex_unlock(&g_mutex);
 
@@ -349,10 +404,25 @@ ASMLLM_API void asm_matmul_q4_mt(
         g_tasks[i].row_end   = r_end;
         g_tasks[i].quant_type = 0; // Q4_0
         done_events[i]       = g_tasks[i].done_event;
-        SetEvent(g_tasks[i].start_event);
     }
 
-    WaitForMultipleObjects((DWORD)num_threads, done_events, TRUE, INFINITE);
+    ATOMIC_SET(&g_workers_completed, 0);
+    ATOMIC_INC(&g_task_generation);
+    if (ATOMIC_GET(&g_sleeping_workers) > 0) {
+        for (int i = 0; i < num_threads; i++) {
+            SetEvent(g_tasks[i].start_event);
+        }
+    }
+
+    int spin_count = 0;
+    while (ATOMIC_GET(&g_workers_completed) < num_threads) {
+        if (spin_count < 5000) {
+            THREAD_YIELD();
+            spin_count++;
+        } else {
+            Sleep(0);
+        }
+    }
 #else
     pthread_mutex_lock(&g_mutex);
     for (int i = 0; i < num_threads; i++) {
@@ -373,14 +443,22 @@ ASMLLM_API void asm_matmul_q4_mt(
         g_tasks[i].task_ready = 1;
     }
 
-    pthread_cond_broadcast(&g_start_cond);
-
-    for (int i = 0; i < num_threads; i++) {
-        while (g_tasks[i].task_ready) {
-            pthread_cond_wait(&g_done_cond, &g_mutex);
-        }
+    ATOMIC_SET(&g_workers_completed, 0);
+    ATOMIC_INC(&g_task_generation);
+    if (ATOMIC_GET(&g_sleeping_workers) > 0) {
+        pthread_cond_broadcast(&g_start_cond);
     }
     pthread_mutex_unlock(&g_mutex);
+
+    int spin_count = 0;
+    while (ATOMIC_GET(&g_workers_completed) < num_threads) {
+        if (spin_count < 5000) {
+            THREAD_YIELD();
+            spin_count++;
+        } else {
+            sched_yield();
+        }
+    }
 #endif
 }
 
@@ -425,10 +503,25 @@ ASMLLM_API void asm_matmul_q4_avx512_mt(
         g_tasks[i].row_end   = r_end;
         g_tasks[i].quant_type = 3; // AVX512 Q4_0
         done_events[i]       = g_tasks[i].done_event;
-        SetEvent(g_tasks[i].start_event);
     }
 
-    WaitForMultipleObjects((DWORD)num_threads, done_events, TRUE, INFINITE);
+    ATOMIC_SET(&g_workers_completed, 0);
+    ATOMIC_INC(&g_task_generation);
+    if (ATOMIC_GET(&g_sleeping_workers) > 0) {
+        for (int i = 0; i < num_threads; i++) {
+            SetEvent(g_tasks[i].start_event);
+        }
+    }
+
+    int spin_count = 0;
+    while (ATOMIC_GET(&g_workers_completed) < num_threads) {
+        if (spin_count < 5000) {
+            THREAD_YIELD();
+            spin_count++;
+        } else {
+            Sleep(0);
+        }
+    }
 #else
     pthread_mutex_lock(&g_mutex);
     for (int i = 0; i < num_threads; i++) {
@@ -449,14 +542,22 @@ ASMLLM_API void asm_matmul_q4_avx512_mt(
         g_tasks[i].task_ready = 1;
     }
 
-    pthread_cond_broadcast(&g_start_cond);
-
-    for (int i = 0; i < num_threads; i++) {
-        while (g_tasks[i].task_ready) {
-            pthread_cond_wait(&g_done_cond, &g_mutex);
-        }
+    ATOMIC_SET(&g_workers_completed, 0);
+    ATOMIC_INC(&g_task_generation);
+    if (ATOMIC_GET(&g_sleeping_workers) > 0) {
+        pthread_cond_broadcast(&g_start_cond);
     }
     pthread_mutex_unlock(&g_mutex);
+
+    int spin_count = 0;
+    while (ATOMIC_GET(&g_workers_completed) < num_threads) {
+        if (spin_count < 5000) {
+            THREAD_YIELD();
+            spin_count++;
+        } else {
+            sched_yield();
+        }
+    }
 #endif
 }
 #endif
@@ -521,14 +622,22 @@ ASMLLM_API void asm_threadpool_dispatch_q8(
         g_tasks[i].task_ready = 1;
     }
 
-    pthread_cond_broadcast(&g_start_cond);
-
-    for (int i = 0; i < num_threads; i++) {
-        while (g_tasks[i].task_ready) {
-            pthread_cond_wait(&g_done_cond, &g_mutex);
-        }
+    ATOMIC_SET(&g_workers_completed, 0);
+    ATOMIC_INC(&g_task_generation);
+    if (ATOMIC_GET(&g_sleeping_workers) > 0) {
+        pthread_cond_broadcast(&g_start_cond);
     }
     pthread_mutex_unlock(&g_mutex);
+
+    int spin_count = 0;
+    while (ATOMIC_GET(&g_workers_completed) < num_threads) {
+        if (spin_count < 5000) {
+            THREAD_YIELD();
+            spin_count++;
+        } else {
+            sched_yield();
+        }
+    }
 #endif
 }
 
@@ -595,14 +704,22 @@ ASMLLM_API void asm_threadpool_dispatch_q5(
         g_tasks[i].task_ready = 1;
     }
 
-    pthread_cond_broadcast(&g_start_cond);
-
-    for (int i = 0; i < num_threads; i++) {
-        while (g_tasks[i].task_ready) {
-            pthread_cond_wait(&g_done_cond, &g_mutex);
-        }
+    ATOMIC_SET(&g_workers_completed, 0);
+    ATOMIC_INC(&g_task_generation);
+    if (ATOMIC_GET(&g_sleeping_workers) > 0) {
+        pthread_cond_broadcast(&g_start_cond);
     }
     pthread_mutex_unlock(&g_mutex);
+
+    int spin_count = 0;
+    while (ATOMIC_GET(&g_workers_completed) < num_threads) {
+        if (spin_count < 5000) {
+            THREAD_YIELD();
+            spin_count++;
+        } else {
+            sched_yield();
+        }
+    }
 #endif
 }
 
