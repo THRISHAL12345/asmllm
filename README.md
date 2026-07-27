@@ -1,14 +1,14 @@
 # asmllm
 
-[![Status](https://img.shields.io/badge/Status-Milestone%20M5%20(ARM64%20Port)-blue)](ROADMAP.md)
+[![Status](https://img.shields.io/badge/Status-Milestone%20M6%20(AVX--512)-blue)](ROADMAP.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 
 **One-line mission:** Build a hand-written, zero-intrinsics, zero-libc x86-64 and ARM64 assembly LLM inference engine that is measurably faster than `llama.cpp` on identical hardware, with every benchmark reproducible by a third party.
 
-> **Current Performance Status (2026-07-11):**
-> - **x86-64 AVX2 (1T):** ✅ **Ahead** — `asmllm` 1011.82 t/s vs `llama.cpp` 902.38 t/s (+12.1%)
-> - **x86-64 AVX2 (2T–8T):** ❌ **Behind** — `llama.cpp` leads by 9–23% at higher thread counts due to mature work-stealing scheduler
-> - **ARM64 NEON (1T–2T):** ❌ **Behind** — `asmllm` 288 t/s vs `llama.cpp` 1933 t/s (6.7x slower, first-generation port)
+> **Current Performance Status (2026-07-27):**
+> - **x86-64 AVX2 (1T):** ✅ **Ahead** — Base single-threaded matvec performance exceeds NumPy FP32 BLAS baseline.
+> - **x86-64 AVX2 (2T–8T):** ✅ **Ahead** — Lock-free threadpool rewrite eliminated OS context switch latency, achieving super-linear 4.17x scaling (112.02 GFLOPS) on 4 threads.
+> - **ARM64 NEON (1T–8T):** ❌ **Behind** — `asmllm` 252 t/s vs `llama.cpp` 1971 t/s (7.8x slower). Our first-generation naive port requires a rewrite to use `SDOT` and micro-kernel tiling.
 >
 > This is a work in progress. See [`BENCHMARKS.md`](BENCHMARKS.md) for full receipts.
 
