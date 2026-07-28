@@ -3,18 +3,18 @@ System Hardware: Darwin 23.6.0 (Apple M1 (Virtual))
 Date: 2026-07-27
 
 asmllm Throughput (t/s):
-  1T: 233.75 t/s
-  2T: 221.27 t/s
-  4T: 245.53 t/s
-  8T: 273.68 t/s
+  1T: 382.78 t/s
+  2T: 386.34 t/s
+  4T: 368.33 t/s
+  8T: 386.29 t/s
 
 llama.cpp Raw Output:
 | model                          |       size |     params | backend    | threads |            test |                  t/s |
 | ------------------------------ | ---------: | ---------: | ---------- | ------: | --------------: | -------------------: |
-| llama ?B Q4_0                  |  17.50 MiB |    24.41 M | CPU        |       1 |           tg128 |     1558.41 ± 408.59 |
-| llama ?B Q4_0                  |  17.50 MiB |    24.41 M | CPU        |       2 |           tg128 |     2008.92 ± 127.01 |
-| llama ?B Q4_0                  |  17.50 MiB |    24.41 M | CPU        |       4 |           tg128 |          4.43 ± 0.04 |
-| llama ?B Q4_0                  |  17.50 MiB |    24.41 M | CPU        |       8 |           tg128 |          0.89 ± 0.01 |
+| llama ?B Q4_0                  |  17.50 MiB |    24.41 M | CPU        |       1 |           tg128 |     1595.02 ± 294.20 |
+| llama ?B Q4_0                  |  17.50 MiB |    24.41 M | CPU        |       2 |           tg128 |     1333.29 ± 288.09 |
+| llama ?B Q4_0                  |  17.50 MiB |    24.41 M | CPU        |       4 |           tg128 |          4.50 ± 0.05 |
+| llama ?B Q4_0                  |  17.50 MiB |    24.41 M | CPU        |       8 |           tg128 |          0.90 ± 0.01 |
 
 build: 961e4b26a (9950)
 
