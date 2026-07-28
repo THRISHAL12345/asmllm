@@ -139,15 +139,26 @@ def build_x86_64_kernels(avx512_enabled: bool = False):
         return so_path
 
 
-def build_arm64_kernels():
+def build_arm64_kernels(sve2_enabled: bool = False):
     kernels_dir = PROJECT_ROOT / "src" / "kernels" / "arm64"
-    asm_files = sorted(kernels_dir.glob("*.S"))
+    all_asm = sorted(kernels_dir.glob("*.S"))
+    
+    if sve2_enabled:
+        asm_files = all_asm
+    else:
+        asm_files = [f for f in all_asm if not f.name.endswith("_sve2.S")]
 
     obj_files = []
     for asm_src in asm_files:
         obj_path = BUILD_DIR / f"{asm_src.stem}.o"
-        print(f"[build_kernel] Assembling ARM64 NEON kernel {asm_src.name}...")
-        cmd_asm = ["clang", "-c", str(asm_src), "-o", str(obj_path)]
+        print(f"[build_kernel] Assembling ARM64 kernel {asm_src.name}...")
+        
+        # SVE2 kernels need -march=armv9-a+sve2
+        if asm_src.name.endswith("_sve2.S"):
+            cmd_asm = ["clang", "-c", "-march=armv9-a+sve2", str(asm_src), "-o", str(obj_path)]
+        else:
+            cmd_asm = ["clang", "-c", str(asm_src), "-o", str(obj_path)]
+            
         res_asm = subprocess.run(cmd_asm, capture_output=True, text=True)
         if res_asm.returncode != 0:
             print(f"[ERROR] clang assembly failed on {asm_src.name}:\n{res_asm.stderr}")
@@ -157,7 +168,10 @@ def build_arm64_kernels():
     threadpool_c = PROJECT_ROOT / "src" / "runtime" / "threadpool.c"
     threadpool_obj = BUILD_DIR / "threadpool.o"
     print(f"[build_kernel] Compiling {threadpool_c.name}...")
-    cmd_tp = ["clang", "-c", "-O2", f"-I{PROJECT_ROOT / 'src' / 'runtime'}", str(threadpool_c), "-o", str(threadpool_obj)]
+    cflags = ["-c", "-O2", f"-I{PROJECT_ROOT / 'src' / 'runtime'}"]
+    if sve2_enabled:
+        cflags.append("-D SVE2_ENABLED")
+    cmd_tp = ["clang"] + cflags + [str(threadpool_c), "-o", str(threadpool_obj)]
     res_tp = subprocess.run(cmd_tp, capture_output=True, text=True)
     if res_tp.returncode != 0:
         print(f"[ERROR] threadpool.c compile failed:\n{res_tp.stderr}")
@@ -190,6 +204,7 @@ def main():
     import platform
     parser = argparse.ArgumentParser(description="asmllm Assembly Kernel Builder")
     parser.add_argument("--avx512", action="store_true", help="Enable AVX-512 advanced path kernels (x86_64 only)")
+    parser.add_argument("--sve2", action="store_true", help="Enable SVE2 advanced path kernels (arm64 only)")
     args = parser.parse_args()
 
     print("================================================================================")
@@ -200,9 +215,13 @@ def main():
         print(f"[build_kernel] Detected ARM64 architecture ({arch}). Building NEON kernels...")
         if args.avx512:
             print("[WARNING] --avx512 ignored on ARM64.")
-        build_arm64_kernels()
+        if args.sve2:
+            print("[build_kernel] SVE2 advanced path ENABLED.")
+        build_arm64_kernels(sve2_enabled=args.sve2)
     else:
         print(f"[build_kernel] Detected x86-64 architecture ({arch}). Building AVX2 kernels...")
+        if args.sve2:
+            print("[WARNING] --sve2 ignored on x86_64.")
         if args.avx512:
             print("[build_kernel] AVX-512 advanced path ENABLED.")
         build_x86_64_kernels(avx512_enabled=args.avx512)

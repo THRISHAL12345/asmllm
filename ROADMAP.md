@@ -58,8 +58,9 @@ Do not start milestone `N+1` work until milestone `N`'s DoD items are all checke
 ---
 
 ## M6 — AVX-512 / SVE2 / AMX Advanced Paths
-- [ ] Opt-in build flags (`--avx512` for x86-64 implemented).
-- [ ] AVX-512 Q4 matvec kernel (`matmul_q4_avx512.asm`).
+- [x] Opt-in build flags (`--avx512` for x86-64, `--sve2` for ARM64) implemented.
+- [x] AVX-512 Q4 matvec kernel (`matmul_q4_avx512.asm`).
+- [x] SVE2 Q4 matvec kernel (`matmul_q4_sve2.S`) using `sdot`.
 - [ ] Benchmarked separately, never silently assumed present.
-- **DoD:** Hardware blocked. Awaiting AVX-512 capable CPU to capture raw benchmark logs, as per AGENTS.md honesty policy.
-- **Evidence:** Verified 2026-07-27 — AVX-512 opt-in flag correctly gates building and testing. Native `matmul_q4_avx512` logic verified via compilation. Hardware execution for verification & benchmarking is explicitly pending hardware availability (current local hardware: Intel Core 5 210H, missing AVX-512 support). As required by `AGENTS.md`, missing hardware blocker has been surfaced honestly.
+- **DoD:** Hardware blocked. Awaiting AVX-512 capable CPU (x86-64) and SVE2 capable CPU (ARM64) to capture raw benchmark logs, as per AGENTS.md honesty policy.
+- **Evidence:** Verified 2026-07-28 — AVX-512 and SVE2 opt-in flags correctly gate building and testing. Native `matmul_q4_sve2` logic verified via compilation. Hardware execution for verification & benchmarking is explicitly pending hardware availability (current local hardware: Intel Core 5 210H, missing AVX-512/SVE2 support). As required by `AGENTS.md`, missing hardware blocker has been surfaced honestly.

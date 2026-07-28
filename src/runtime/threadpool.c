@@ -66,6 +66,17 @@ extern void asm_matmul_q4_avx512(
 );
 #endif
 
+#ifdef SVE2_ENABLED
+extern void asm_matmul_q4_sve2(
+    const uint8_t* qweights,
+    const float*   scales,
+    const float*   x,
+    float*         y,
+    int64_t        M,
+    int64_t        K
+);
+#endif
+
 extern void asm_matmul_q8(
     const int8_t*  qweights,
     const float*   scales,
@@ -168,6 +179,12 @@ static DWORD WINAPI worker_main_win32(LPVOID arg) {
                 int64_t q_bytes_per_row = task->K / 2;
                 const uint8_t* q_tile = task->qweights + task->row_start * q_bytes_per_row;
                 asm_matmul_q4_avx512(q_tile, s_tile, task->x, y_tile, row_count, task->K);
+#endif
+#ifdef SVE2_ENABLED
+            } else if (task->quant_type == 4) {
+                int64_t q_bytes_per_row = task->K / 2;
+                const uint8_t* q_tile = task->qweights + task->row_start * q_bytes_per_row;
+                asm_matmul_q4_sve2(q_tile, s_tile, task->x, y_tile, row_count, task->K);
 #endif
             } else if (task->quant_type == 1) {
                 int64_t q_bytes_per_row = task->K;
@@ -295,6 +312,12 @@ static void* worker_main_posix(void* arg) {
                 int64_t q_bytes_per_row = task->K / 2;
                 const uint8_t* q_tile = task->qweights + task->row_start * q_bytes_per_row;
                 asm_matmul_q4_avx512(q_tile, s_tile, task->x, y_tile, row_count, task->K);
+#endif
+#ifdef SVE2_ENABLED
+            } else if (task->quant_type == 4) {
+                int64_t q_bytes_per_row = task->K / 2;
+                const uint8_t* q_tile = task->qweights + task->row_start * q_bytes_per_row;
+                asm_matmul_q4_sve2(q_tile, s_tile, task->x, y_tile, row_count, task->K);
 #endif
             } else if (task->quant_type == 1) {
                 int64_t q_bytes_per_row = task->K;
@@ -762,5 +785,27 @@ ASMLLM_API void asm_matmul_q5_mt(
     }
     asm_threadpool_dispatch_q5(ql, qh, scales, x, y, M, K);
 }
+
+#ifdef SVE2_ENABLED
+ASMLLM_API void asm_matmul_q4_sve2_mt(
+    const uint8_t* qweights,
+    const float*   scales,
+    const float*   x,
+    float*         y,
+    int64_t        M,
+    int64_t        K,
+    int            num_threads
+) {
+    if (num_threads <= 1 || M < 32) {
+        asm_matmul_q4_sve2(qweights, scales, x, y, M, K);
+        return;
+    }
+    if (g_pool_size != num_threads) {
+        asm_threadpool_init(num_threads);
+    }
+    asm_threadpool_dispatch(qweights, scales, x, y, M, K, 4); // SVE2 is quant_type 4
+}
+#endif
+
 #endif
 
